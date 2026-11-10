@@ -11,4 +11,4 @@ requests
 aiohttp
 pillow
 wordfreq
-
+kurigram>=2.2.17
