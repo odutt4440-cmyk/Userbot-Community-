@@ -29,7 +29,12 @@ from database import (
     users_db_proxy, 
     set_module_testing,
     is_module_in_testing,
-    subs_db_proxy
+    subs_db_proxy,
+    get_all_plans,
+    update_plan_price,
+    update_plan_days,
+    toggle_plan_active,
+    seed_default_plans,
 )
 
 # --- HELPER: STAFF PERMISSION CHECK ---
@@ -40,7 +45,13 @@ async def check_power(user_id, power_type):
     return info[0] == 1 if power_type == 'ban' else info[1] == 1
 
 # ============================================================
-# --- SUDO PANEL (All commands as colored buttons) ---
+# --- STATE TRACKING (for pricing updates) ---
+# ============================================================
+# {user_id: {"action": "price"/"days", "plan_key": "std_15"}}
+AWAITING_PLAN_INPUT = {}
+
+# ============================================================
+# --- SUDO PANEL ---
 # ============================================================
 
 SUDO_PANEL_BUTTONS = [
@@ -56,6 +67,8 @@ SUDO_PANEL_BUTTONS = [
     ("📉 Cancel Plan", "panel_cancel", ButtonStyle.DANGER),
     ("👤 User Info", "panel_info", ButtonStyle.PRIMARY),
     ("📡 Active Bots", "panel_active", ButtonStyle.PRIMARY),
+    ("💰 Update Pricing", "panel_pricing", ButtonStyle.SUCCESS),
+    ("🔄 Reset Plans", "panel_reset_plans", ButtonStyle.DANGER),
 ]
 
 def build_sudo_panel():
@@ -106,6 +119,8 @@ async def sudo_panel_callback(client, query):
         "info": "👤 **User Info**\n\nSend: `/info <user_id>`",
     }
     
+    back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="panel_back", style=ButtonStyle.PRIMARY)]])
+    
     if action == "stats":
         u_count = await users_db_proxy.count_documents({})
         s_count = await subs_db_proxy.count_documents({})
@@ -114,7 +129,7 @@ async def sudo_panel_callback(client, query):
             f"👤 **Total Registered:** `{u_count}`\n"
             f"💎 **Active Premium:** `{s_count}`\n"
             f"📡 **Running Bots:** `{len(ACTIVE_CLIENTS)}`",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="panel_back", style=ButtonStyle.PRIMARY)]])
+            reply_markup=back_btn
         )
     elif action == "sudolist":
         from database import list_all_sudos
@@ -125,7 +140,7 @@ async def sudo_panel_callback(client, query):
             text = "📋 **SUDO LIST**\n\n"
             for r in rows:
                 text += f"• `{r[0]}` | Ban: {r[1]} | Pay: {r[2]}\n"
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="panel_back", style=ButtonStyle.PRIMARY)]]))
+        await query.message.edit_text(text, reply_markup=back_btn)
     elif action == "active":
         if not ACTIVE_CLIENTS:
             text = "📡 No active userbots."
@@ -133,14 +148,97 @@ async def sudo_panel_callback(client, query):
             text = "📡 **Active Sessions:**\n\n"
             for uid in list(ACTIVE_CLIENTS.keys()):
                 text += f"👤 `{uid}`\n"
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="panel_back", style=ButtonStyle.PRIMARY)]]))
+        await query.message.edit_text(text, reply_markup=back_btn)
+    elif action == "pricing":
+        # Show all plans as buttons to update price
+        plans = await get_all_plans()
+        if not plans:
+            await query.message.edit_text("⚠️ No plans in database.", reply_markup=back_btn)
+        else:
+            buttons = []
+            row = []
+            for p in plans:
+                label = f"{p['plan_key']} - ₹{p['price']}"
+                row.append(InlineKeyboardButton(label, callback_data=f"price_sel_{p['plan_key']}", style=ButtonStyle.PRIMARY))
+                if len(row) == 2:
+                    buttons.append(row)
+                    row = []
+            if row: buttons.append(row)
+            buttons.append([InlineKeyboardButton("🔙 Back", callback_data="panel_back", style=ButtonStyle.PRIMARY)])
+            
+            await query.message.edit_text(
+                "💰 **UPDATE PRICING**\n\n"
+                "Select a plan to change its price:",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+    elif action == "reset_plans":
+        await seed_default_plans()
+        await query.message.edit_text(
+            "✅ **Plans Reset**\n\nAll 8 default plans have been re-seeded into the database.",
+            reply_markup=back_btn
+        )
     elif action == "back":
         await query.message.edit_text("🛡️ **SUDO ADMIN PANEL**\n\nSelect a command below:", reply_markup=build_sudo_panel())
     else:
         hint = hints.get(action, "❓ Unknown action.")
-        await query.message.edit_text(hint, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="panel_back", style=ButtonStyle.PRIMARY)]]))
+        await query.message.edit_text(hint, reply_markup=back_btn)
     
     await query.answer()
+
+# --- Pricing plan selection ---
+@bot.on_callback_query(filters.regex(r"^price_sel_(\w+)$"))
+async def price_plan_selected(client, query):
+    if query.from_user.id != ADMIN_ID and not await is_staff(query.from_user.id):
+        return await query.answer("Access denied.", show_alert=True)
+    
+    plan_key = query.matches[0].group(1)
+    AWAITING_PLAN_INPUT[query.from_user.id] = {"action": "price", "plan_key": plan_key}
+    
+    await query.message.edit_text(
+        f"💰 **Update Price: `{plan_key}`**\n\n"
+        f"Please send the **new price in INR** (numbers only):\n"
+        f"Example: `20`",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Cancel", callback_data="panel_pricing", style=ButtonStyle.DANGER)]
+        ])
+    )
+    await query.answer()
+
+# --- Handle admin's price input ---
+@bot.on_message(filters.private & filters.text)
+async def handle_price_input(client, message):
+    user_id = message.from_user.id
+    if user_id not in AWAITING_PLAN_INPUT:
+        return
+    
+    state = AWAITING_PLAN_INPUT[user_id]
+    if state["action"] != "price":
+        return
+    
+    try:
+        new_price = int(message.text.strip())
+        if new_price < 1:
+            raise ValueError("Price must be positive")
+    except:
+        return await message.reply("❌ Invalid input. Please send a positive number.")
+    
+    plan_key = state["plan_key"]
+    success = await update_plan_price(plan_key, new_price)
+    
+    del AWAITING_PLAN_INPUT[user_id]
+    
+    if success:
+        await message.reply(
+            f"✅ **Price Updated!**\n\n"
+            f"Plan: `{plan_key}`\n"
+            f"New Price: **₹{new_price}**\n\n"
+            f"Changes are live on the plans page and QR payments.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Back to Panel", callback_data="panel_pricing", style=ButtonStyle.PRIMARY)]
+            ])
+        )
+    else:
+        await message.reply("⚠️ Failed to update. Plan key not found.")
 
 # ============================================================
 # --- 1. SUDO MANAGEMENT (OWNER ONLY) ---
@@ -221,7 +319,7 @@ async def logout_handler(client, message):
     await remove_user_session(user_id)
     await message.reply(f"✅ **Logout Done:** `{user_id}` session terminated.")
 
-# --- 3. TESTING CONTROL (OWNER ONLY) ---
+# --- 3. TESTING CONTROL ---
 
 @bot.on_message(filters.command("testmode") & filters.private)
 async def toggle_test_mode(client, message):
@@ -362,7 +460,7 @@ async def get_db_backup(client, message):
     status_msg = await message.reply("⏳ Exporting cloud data...")
     try:
         data = {}
-        for coll in ["users", "subscriptions", "banned_users"]:
+        for coll in ["users", "subscriptions", "banned_users", "plans"]:
             cursor = db[coll].find({})
             data[coll] = [doc async for doc in cursor]
         with open("backup.json", "w", encoding="utf-8") as f:
