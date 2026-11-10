@@ -16,6 +16,9 @@ from database import (
     get_plan
 )
 
+# 🔥 DEBUG: Ye log build mein dikhega
+print("[DEBUG] ✅ PAYMENT.PY LOADED - NEW CODE ACTIVE")
+
 # Tracking users: {user_id: plan_key}
 WAITING_FOR_PAYMENT = {}
 
@@ -29,6 +32,7 @@ async def can_user_approve(user_id):
 
 # --- 1. SHOW PAYMENT INFO (Kurigram + Dynamic QR from DB) ---
 async def show_payment_info(message, plan_key):
+    print(f"[DEBUG] show_payment_info called for user: {message.from_user.id}, plan: {plan_key}")
     user_id = message.from_user.id
     
     # 🔥 DB se plan fetch karo (no more hardcoded PLAN_MAP)
@@ -128,6 +132,7 @@ async def show_payment_info(message, plan_key):
 # --- 2. RECEIVE SCREENSHOT ---
 @bot.on_message(filters.private & filters.photo, group=-3)
 async def receive_screenshot(client, message):
+    print(f"[DEBUG] 🔥 PHOTO RECEIVED from user: {message.from_user.id}")
     user_id = message.from_user.id
     
     if user_id in WAITING_FOR_PAYMENT:
@@ -171,21 +176,26 @@ async def receive_screenshot(client, message):
             ])
             
             try:
+                print(f"[DEBUG] Sending photo to LOG_GROUP: {LOG_GROUP}")
                 await bot.send_photo(
                     LOG_GROUP,
                     message.photo.file_id,
                     caption=admin_text,
                     reply_markup=admin_buttons
                 )
+                print("[DEBUG] ✅ Photo successfully sent to LOG_GROUP")
             except Exception as e:
-                print(f"Admin Log Error: {e}")
+                print(f"[DEBUG] ❌ Admin Log Error: {e}")
                 await bot.send_message(LOG_GROUP, admin_text, reply_markup=admin_buttons)
         
         del WAITING_FOR_PAYMENT[user_id]
+    else:
+        print(f"[DEBUG] ⚠️ User {user_id} sent photo but is not in WAITING_FOR_PAYMENT")
 
 # --- 3. SUDO APPROVAL LOGIC (DB-connected) ---
 @bot.on_callback_query(filters.regex(r"^appr_(\w+)_(\d+)$"))
 async def approve_payment(client, query):
+    print(f"[DEBUG] Approve button clicked by: {query.from_user.id}")
     if not await can_user_approve(query.from_user.id):
         return await query.answer("⚠️ You don't have 'Pay' permission.", show_alert=True)
 
@@ -243,6 +253,7 @@ async def approve_payment(client, query):
 # --- 4. SUDO REJECT LOGIC ---
 @bot.on_callback_query(filters.regex(r"^reject_(\d+)$"))
 async def reject_payment(client, query):
+    print(f"[DEBUG] Reject button clicked by: {query.from_user.id}")
     if not await can_user_approve(query.from_user.id):
         return await query.answer("⚠️ Access Denied.", show_alert=True)
     
