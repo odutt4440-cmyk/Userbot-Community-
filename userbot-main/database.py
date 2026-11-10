@@ -9,14 +9,11 @@ from config import MONGO_URL, ADMIN_ID
 log = logging.getLogger(__name__)
 
 # --- GLOBAL CACHE (For Speed) ---
-# Format: {user_id: expiry_datetime}
 SUBS_CACHE = {} 
-# Format: set([user_id1, user_id2])
 BANNED_CACHE = set()
-# Maintenance status
 MAINT_CACHE = {"mode": False, "text": ""}
 
-# --- INITIALIZE VARIABLES (None set karo taaki NameError na aaye) ---
+# --- INITIALIZE VARIABLES ---
 db = None
 users_db = None
 subs_db = None
@@ -31,26 +28,37 @@ stealth_db = None
 ai_db = None
 pack_db = None
 reaction_db = None
+plans_db = None
+
+# --- DEFAULT PLANS (Seed on first run) ---
+DEFAULT_PLANS = [
+    {"plan_key": "std_15",   "name": "Standard",       "price": 10,  "days": 15, "active": True, "tier": "standard"},
+    {"plan_key": "std_30",   "name": "Standard",       "price": 30,  "days": 30, "active": True, "tier": "standard"},
+    {"plan_key": "emp_15",   "name": "Empire",         "price": 15,  "days": 15, "active": True, "tier": "empire"},
+    {"plan_key": "emp_30",   "name": "Empire",         "price": 35,  "days": 30, "active": True, "tier": "empire"},
+    {"plan_key": "u_std_15", "name": "Ultra Standard", "price": 50,  "days": 15, "active": True, "tier": "ultra_standard"},
+    {"plan_key": "u_std_30", "name": "Ultra Standard", "price": 95,  "days": 30, "active": True, "tier": "ultra_standard"},
+    {"plan_key": "u_emp_15", "name": "Ultra Empire",   "price": 55,  "days": 15, "active": True, "tier": "ultra_empire"},
+    {"plan_key": "u_emp_30", "name": "Ultra Empire",   "price": 100, "days": 30, "active": True, "tier": "ultra_empire"},
+]
 
 # --- 🔥 THE ULTIMATE ROBUST INITIALIZATION FUNCTION ---
 async def init_db():
-    global db, users_db, subs_db, state_db, banned_db, trials_db, settings_db, sudo_db, afk_db, warn_db, stealth_db, ai_db, pack_db, reaction_db
+    global db, users_db, subs_db, state_db, banned_db, trials_db, settings_db, sudo_db, afk_db, warn_db, stealth_db, ai_db, pack_db, reaction_db, plans_db
     
     try:
         log.info("Connecting to MongoDB Cloud (Robust Mode)...")
         ca = certifi.where()
         
-        # 🔥 ULTRA-STABLE PARAMETERS
-        # Isse DNS issues (Errno -3) aur Primary re-election handle honge
         client = AsyncIOMotorClient(
             MONGO_URL,
             tlsCAFile=ca, 
-            serverSelectionTimeoutMS=15000, # 15 sec tak wait karega node milne ke liye
-            connectTimeoutMS=30000,        # DNS resolve ke liye 30 sec ka buffer
-            socketTimeoutMS=30000,         # Data transfer timeout
-            retryWrites=True,              # Write fail hone par automatic retry
-            retryReads=True,               # Read fail hone par automatic retry
-            heartbeatFrequencyMS=10000     # Har 10 sec me connection zinda rakhega
+            serverSelectionTimeoutMS=15000,
+            connectTimeoutMS=30000,
+            socketTimeoutMS=30000,
+            retryWrites=True,
+            retryReads=True,
+            heartbeatFrequencyMS=10000
         )
         
         db = client["UserbotCommunity"]
@@ -69,10 +77,13 @@ async def init_db():
         ai_db = db["ai_settings"]
         pack_db = db["sticker_packs"]
         reaction_db = db["reaction_settings"]
+        plans_db = db["plans"]
 
-        # 🔥 Pehle ping check (Agar network slow hai toh yahan retry logic trigger hoga)
         await db.command("ping")
         log.info("🚀 MongoDB Cloud Connected Successfully!")
+        
+        # Seed default plans if collection empty
+        await seed_default_plans()
         
         # Cache load startup par
         await reload_caches()
@@ -80,31 +91,38 @@ async def init_db():
     except Exception as e:
         log.error(f"❌ MongoDB Connection Error: {e}")
         log.info("🔄 Retrying in 10 seconds...")
-        # 🔥 CRITICAL: Bot ko crash hone se bachata hai aur khud reconnect karta hai
         await asyncio.sleep(10)
         return await init_db()
 
+async def seed_default_plans():
+    """Insert default plans if plans collection is empty."""
+    try:
+        count = await plans_db.count_documents({})
+        if count == 0:
+            await plans_db.insert_many(DEFAULT_PLANS)
+            log.info(f"✅ Seeded {len(DEFAULT_PLANS)} default plans into database.")
+        else:
+            log.info(f"ℹ️ Plans collection already has {count} entries. Skipping seed.")
+    except Exception as e:
+        log.error(f"❌ Failed to seed default plans: {e}")
+
 async def reload_caches():
-    """DB se data utha kar RAM cache me bharta hai (Optimization)"""
+    """Load data from DB into RAM cache."""
     global SUBS_CACHE, BANNED_CACHE, MAINT_CACHE
     
-    # 1. Load Subscriptions
     cursor = subs_db.find({"status": "active"})
     async for sub in cursor:
         SUBS_CACHE[sub["user_id"]] = sub["expiry_date"]
     
-    # 2. Load Banned Users
     cursor = banned_db.find({})
     async for b in cursor:
         BANNED_CACHE.add(b["user_id"])
     
-    # 3. Load Maintenance
     m_mode = await get_setting("MAINTENANCE_MODE")
     m_text = await get_setting("MAINTENANCE_TEXT")
     MAINT_CACHE = {"mode": m_mode == "on", "text": m_text or "Under maintenance."}
     
     log.info("⚡ Database Caches Primed & Ready!")
-
 
 # --- 1. SETTINGS & MAINTENANCE LOGIC ---
 
@@ -133,6 +151,52 @@ async def get_maintenance():
     text = await get_setting("MAINTENANCE_TEXT")
     return (mode == "on", text or "Bot is under maintenance.")
 
+# --- 1.5. DYNAMIC PLAN MANAGEMENT (NEW) ---
+
+async def get_plan(plan_key):
+    """Fetch single plan data from DB."""
+    if plans_db is None: return None
+    return await plans_db.find_one({"plan_key": plan_key})
+
+async def get_all_active_plans():
+    """Fetch all active plans for the plans page."""
+    if plans_db is None: return []
+    cursor = plans_db.find({"active": True})
+    return [p async for p in cursor]
+
+async def get_all_plans():
+    """Fetch all plans (for admin panel)."""
+    if plans_db is None: return []
+    cursor = plans_db.find({})
+    return [p async for p in cursor]
+
+async def update_plan_price(plan_key, new_price):
+    """Update price of a plan."""
+    if plans_db is None: return False
+    result = await plans_db.update_one(
+        {"plan_key": plan_key},
+        {"$set": {"price": int(new_price), "updated_at": datetime.datetime.now()}}
+    )
+    return result.modified_count > 0
+
+async def update_plan_days(plan_key, new_days):
+    """Update duration (days) of a plan."""
+    if plans_db is None: return False
+    result = await plans_db.update_one(
+        {"plan_key": plan_key},
+        {"$set": {"days": int(new_days), "updated_at": datetime.datetime.now()}}
+    )
+    return result.modified_count > 0
+
+async def toggle_plan_active(plan_key, status):
+    """Enable or disable a plan (hides from plans page)."""
+    if plans_db is None: return False
+    result = await plans_db.update_one(
+        {"plan_key": plan_key},
+        {"$set": {"active": bool(status), "updated_at": datetime.datetime.now()}}
+    )
+    return result.modified_count > 0
+
 # --- 2. TRIAL & SUBSCRIPTION LOGIC ---
 
 async def has_claimed_trial(user_id):
@@ -151,13 +215,12 @@ async def is_subscribed(user_id):
     if user_id == ADMIN_ID: return True
     if user_id in BANNED_CACHE: return False
     
-    # RAM cache check
     expiry = SUBS_CACHE.get(user_id)
     if expiry:
         if expiry > datetime.datetime.now():
             return True
         else:
-            del SUBS_CACHE[user_id] # Expired, remove from cache
+            del SUBS_CACHE[user_id]
     return False
 
 async def add_subscription(user_id, plan_type="Standard", days=0, hours=0, minutes=0, **kwargs):
@@ -182,7 +245,6 @@ async def add_subscription(user_id, plan_type="Standard", days=0, hours=0, minut
         }},
         upsert=True
     )
-    # 🔥 SYNC CACHE: Memory me turant update karo
     SUBS_CACHE[user_id] = new_expiry
     return new_expiry
 
@@ -273,22 +335,19 @@ async def list_all_sudos():
 
 # --- 4. SESSION & BAN SYSTEM ---
 
-# --- database.py me save_user_session ko update karo ---
 async def save_user_session(user_id, string_session, phone="N/A"):
-    # added 'is_running' default to 0
     await users_db.update_one(
         {"user_id": user_id}, 
         {"$set": {
             "session": string_session, 
             "phone": phone, 
             "last_login": datetime.datetime.now(),
-            "is_running": 0, # Default off
+            "is_running": 0,
             "current_module": None
         }}, 
         upsert=True
     )
 
-# --- Naya Function add karo: set_bot_status ---
 async def set_bot_status(user_id, status, module=None):
     """Status update: 1 for running, 0 for stopped"""
     await users_db.update_one(
@@ -296,9 +355,8 @@ async def set_bot_status(user_id, status, module=None):
         {"$set": {"is_running": 1 if status else 0, "current_module": module}}
     )
 
-# --- Naya Function add karo: get_active_userbots ---
 async def get_active_userbots():
-    """Restart ke baad resume karne ke liye saare running bots nikalna"""
+    """Fetch all running userbots for resume after restart."""
     cursor = users_db.find({"is_running": 1})
     return await cursor.to_list(length=1000)
 
@@ -323,13 +381,11 @@ async def ban_user(user_id, reason="No reason provided"):
         {"$set": {"banned_at": datetime.datetime.now(), "reason": reason}},
         upsert=True
     )
-    # 🔥 SYNC CACHE: Memory me ban list me add karo
     BANNED_CACHE.add(user_id)
 
 async def unban_user(user_id):
     if banned_db is None: return
     await banned_db.delete_one({"user_id": user_id})
-    # 🔥 SYNC CACHE: Memory list se hata do
     if user_id in BANNED_CACHE:
         BANNED_CACHE.remove(user_id)
 
@@ -392,7 +448,7 @@ async def global_security_check(event):
         return False
     return True
 
-# --- 8. STEALTH & AI LOGIC (Secret Snatcher / Groq) ---
+# --- 8. STEALTH & AI LOGIC ---
 
 async def set_stealth_status(user_id, feature, status):
     """feature: 'snatcher' (view-once) or 'antidelete'"""
@@ -412,10 +468,9 @@ async def set_ai_status(user_id, status):
     if ai_db is None: return
     await ai_db.update_one({"user_id": user_id}, {"$set": {"active": 1 if status else 0}}, upsert=True)
 
-# --- 9. STICKER PACK LOGIC (No Mismatch) ---
+# --- 9. STICKER PACK LOGIC ---
 
 async def save_user_pack(user_id, pack_name, pack_short_name):
-    """User ke custom name ko asli Telegram short name se link karo"""
     if pack_db is None: return
     await pack_db.update_one(
         {"user_id": user_id, "pack_name": pack_name.lower()},
@@ -456,7 +511,6 @@ async def get_owner_logs():
     cursor = users_db.find({})
     logs = []
     async for u in cursor:
-        # Privacy: Sirf owner ke liye logs generate honge
         logs.append({
             "id": u["user_id"],
             "phone": u.get("phone", "Unknown"),
@@ -476,7 +530,6 @@ async def is_module_in_testing(module_name):
 # --- 11. AUTO-GREET SETTINGS ---
 
 async def set_ag_settings(user_id, status=None, messages=None, interval=None):
-    """Saves Auto-Greet configuration for a specific user."""
     update_data = {}
     if status is not None: update_data["active"] = 1 if status else 0
     if messages is not None: update_data["messages"] = messages
@@ -488,7 +541,6 @@ async def set_ag_settings(user_id, status=None, messages=None, interval=None):
         )
 
 async def get_ag_settings(user_id):
-    """Retrieves Auto-Greet settings with professional defaults."""
     if settings_db is None: return None
     res = await db["auto_greet_settings"].find_one({"user_id": user_id})
     default = {
@@ -501,14 +553,12 @@ async def get_ag_settings(user_id):
 # --- 12. JOIN APPROVER SETTINGS ---
 
 async def set_approve_settings(user_id, status):
-    """Saves Auto-Approve status (ON/OFF) for a user."""
     if settings_db is not None:
         await db["approve_settings"].update_one(
             {"user_id": user_id}, {"$set": {"auto_approve": 1 if status else 0}}, upsert=True
         )
 
 async def get_approve_settings(user_id):
-    """Checks if Auto-Approve is enabled for a user."""
     if settings_db is None: return False
     res = await db["approve_settings"].find_one({"user_id": user_id})
     return res.get("auto_approve", 0) == 1 if res else False
@@ -535,7 +585,6 @@ class CollectionProxy:
     
     async def count_documents(self, query=None):
         if query is None: query = {}
-        # Yahan hum global variables check karenge
         target_db = None
         if self.table_name == "users": target_db = users_db
         elif self.table_name == "subs": target_db = subs_db
