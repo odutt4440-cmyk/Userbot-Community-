@@ -1,24 +1,23 @@
+from pyrogram import filters
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ButtonStyle
 from bot_instance import bot
-from telethon import events, Button
-from database import get_user_profile, global_security_check
-import datetime
+from database import get_user_profile
+
+# Use Kurigram-compatible security check from start.py
+from plugins.start import global_security_check as start_security_check
 
 # --- USER PROFILE COMMAND: /me ---
-@bot.on(events.NewMessage(pattern=r'(?i)^/me'))
-async def user_profile_handler(event):
-    # 🛡️ Private DM Check
-    if not event.is_private:
-        return # Ignore in groups as per your request
-
+@bot.on_message(filters.command("me") & filters.private)
+async def user_profile_handler(client, message):
     # 🛡️ Global Ban/Maintenance Check
-    if not await global_security_check(event):
+    if not await start_security_check(message):
         return
 
-    user_id = event.sender_id
-    user = await event.get_sender()
-    name = user.first_name if user.first_name else "User"
+    user_id = message.from_user.id
+    name = message.from_user.first_name or "User"
 
-    # Database se optimized profile data uthao
+    # Fetch profile from DB
     profile = await get_user_profile(user_id)
 
     profile_text = (
@@ -33,9 +32,9 @@ async def user_profile_handler(event):
         "✨ *Standard Plan:* One module at a time."
     )
 
-    buttons = [
-        [Button.inline("⚙️ My Modules", data="modules_main")],
-        [Button.inline("💳 Upgrade / Renew", data="pay_now")]
-    ]
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚙️ My Modules", callback_data="modules_main", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("💳 Upgrade / Renew", callback_data="pay_now", style=ButtonStyle.SUCCESS)]
+    ])
 
-    await event.reply(profile_text, buttons=buttons)
+    await message.reply(profile_text, reply_markup=buttons)
