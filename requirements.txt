@@ -1,5 +1,5 @@
 Telethon==1.44.0
-py-tgcalls @ git+https://github.com/pytgcalls/pytgcalls.git
+py-tgcalls @ https://github.com/pytgcalls/pytgcalls/archive/refs/heads/master.zip
 ntgcalls
 motor==3.7.1
 pymongo==4.18.0
