@@ -68,6 +68,10 @@ async def resume_userbots():
 def load_plugins():
     path = "plugins/*.py"
     files = glob.glob(path)
+    
+    # 🔥 FIX: Payment.py ko sabse pehle load karo
+    files.sort(key=lambda x: "payment" not in x)
+    
     for name in files:
         if name.endswith("__init__.py"):
             continue
