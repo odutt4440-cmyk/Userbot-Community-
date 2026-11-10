@@ -41,13 +41,20 @@ async def show_payment_info(message, plan_key):
     
     if LOG_GROUP:
         try:
+            # User ka naam nikalna (button click karne wale ka)
             user_name = message.from_user.first_name or "User"
             username = f"@{message.from_user.username}" if message.from_user.username else "N/A"
+            
             await bot.send_message(
                 LOG_GROUP, 
-                f"💸 **Payment Intent:** `{user_name}` ({username}) is buying **{plan['name']} ({plan['days']}d)** for ₹{plan['price']}."
+                f"💸 **Payment Intent:**\n"
+                f"👤 **User:** {user_name} ({username})\n"
+                f"🆔 **ID:** `{user_id}`\n"
+                f"💎 **Plan:** {plan['name']} ({plan['days']}d)\n"
+                f"💰 **Amount:** ₹{plan['price']}"
             )
-        except: pass
+        except Exception as e:
+            print(f"Log Group Error: {e}")
 
     is_ultra = "Ultra" in plan['name']
     amount = plan['price']
@@ -119,7 +126,6 @@ async def show_payment_info(message, plan_key):
         )
 
 # --- 2. RECEIVE SCREENSHOT ---
-# 🔥 FIX: group=-3 add kiya taaki ye handler sabse pehle trigger ho
 @bot.on_message(filters.private & filters.photo, group=-3)
 async def receive_screenshot(client, message):
     user_id = message.from_user.id
