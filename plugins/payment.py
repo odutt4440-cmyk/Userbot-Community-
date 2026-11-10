@@ -42,9 +42,10 @@ async def show_payment_info(message, plan_key):
     if LOG_GROUP:
         try:
             user_name = message.from_user.first_name or "User"
+            username = f"@{message.from_user.username}" if message.from_user.username else "N/A"
             await bot.send_message(
                 LOG_GROUP, 
-                f"💸 **Payment Intent:** `{user_name}` is buying **{plan['name']} ({plan['days']}d)** for ₹{plan['price']}."
+                f"💸 **Payment Intent:** `{user_name}` ({username}) is buying **{plan['name']} ({plan['days']}d)** for ₹{plan['price']}."
             )
         except: pass
 
@@ -118,7 +119,8 @@ async def show_payment_info(message, plan_key):
         )
 
 # --- 2. RECEIVE SCREENSHOT ---
-@bot.on_message(filters.private & filters.photo)
+# 🔥 FIX: group=-3 add kiya taaki ye handler sabse pehle trigger ho
+@bot.on_message(filters.private & filters.photo, group=-3)
 async def receive_screenshot(client, message):
     user_id = message.from_user.id
     
@@ -128,7 +130,7 @@ async def receive_screenshot(client, message):
         if not plan:
             return
         user_name = message.from_user.first_name or "User"
-        username = message.from_user.username or "N/A"
+        username = f"@{message.from_user.username}" if message.from_user.username else "N/A"
         
         await message.reply(
             f"✅ **Screenshot Received for {plan['name']}!**\n"
@@ -139,7 +141,7 @@ async def receive_screenshot(client, message):
         admin_text = (
             f"{'🔥 **ULTRA ID REQUEST** 🔥' if is_ultra else '🔔 **NEW PAYMENT REQUEST**'}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 **User:** {user_name} (@{username})\n"
+            f"👤 **User:** {user_name} ({username})\n"
             f"🆔 **ID:** `{user_id}`\n"
             f"💎 **Plan:** `{plan['name']}`\n"
             f"⏳ **Days:** `{plan['days']}`\n"
@@ -179,8 +181,7 @@ async def receive_screenshot(client, message):
 @bot.on_callback_query(filters.regex(r"^appr_(\w+)_(\d+)$"))
 async def approve_payment(client, query):
     if not await can_user_approve(query.from_user.id):
-        await query.answer("⚠️ You don't have 'Pay' permission.", show_alert=True)
-        return
+        return await query.answer("⚠️ You don't have 'Pay' permission.", show_alert=True)
 
     match = query.matches[0]
     plan_key = match.group(1)
@@ -194,7 +195,6 @@ async def approve_payment(client, query):
             show_alert=True
         )
 
-    # 🔥 DB se plan fetch karo (latest price/days)
     plan_info = await get_plan(plan_key)
     if not plan_info:
         return await query.answer("❌ Error: Invalid Plan Key.", show_alert=True)
@@ -238,8 +238,7 @@ async def approve_payment(client, query):
 @bot.on_callback_query(filters.regex(r"^reject_(\d+)$"))
 async def reject_payment(client, query):
     if not await can_user_approve(query.from_user.id):
-        await query.answer("⚠️ Access Denied.", show_alert=True)
-        return
+        return await query.answer("⚠️ Access Denied.", show_alert=True)
     
     target_user_id = int(query.matches[0].group(1))
     admin_name = query.from_user.first_name or "Admin"
