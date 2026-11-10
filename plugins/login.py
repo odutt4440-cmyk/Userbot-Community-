@@ -57,7 +57,7 @@ async def login_step_1(client, query):
     await query.answer()
 
 # --- 2. RECEIVE STRING HANDLER ---
-@bot.on_message(filters.private & filters.text & ~filters.command(["start", "help", "commands", "plan", "admin", "modules"]))
+@bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "help", "commands", "plan", "admin", "modules"]))
 async def receive_string(client, message):
     user_id = message.from_user.id
     
