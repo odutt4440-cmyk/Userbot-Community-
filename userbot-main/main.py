@@ -3,10 +3,9 @@ import os
 import glob
 import importlib
 import asyncio
-import shutil 
-import datetime
 import gc
-from telethon import functions, types
+from pyrogram import idle
+from pyrogram.types import BotCommand
 from config import API_ID, API_HASH, BOT_TOKEN, LOG_GROUP, ADMIN_ID, BACKUP_CHAT
 from bot_instance import bot 
 from database import init_db, get_active_userbots
@@ -88,23 +87,19 @@ async def start_bot():
     await init_db()
     log.info("SaaS Database connected (MongoDB Cloud).")
 
-    # STEP 2: START MANAGER BOT
-    await bot.start(bot_token=BOT_TOKEN)
+    # STEP 2: START MANAGER BOT (Kurigram)
+    await bot.start()
 
-    # --- SYNC BOT COMMANDS ---
+    # --- SYNC BOT COMMANDS (Kurigram native method) ---
     try:
-        await bot(functions.bots.SetBotCommandsRequest(
-            scope=types.BotCommandScopeDefault(),
-            lang_code='en',
-            commands=[
-                types.BotCommand(command='start', description='Open the main menu'),
-                types.BotCommand(command="commands", description="View all userbot commands"),
-                types.BotCommand(command='modules', description='Manage your active modules'),
-                types.BotCommand(command='plan', description='Premium subscription plans'),
-                types.BotCommand(command='me', description='Check your profile status'),
-                types.BotCommand(command='help', description='Empire Community guide')
-            ]
-        ))
+        await bot.set_bot_commands([
+            BotCommand("start", "Open the main menu"),
+            BotCommand("commands", "View all userbot commands"),
+            BotCommand("modules", "Manage your active modules"),
+            BotCommand("plan", "Premium subscription plans"),
+            BotCommand("me", "Check your profile status"),
+            BotCommand("help", "Empire Community guide")
+        ])
         log.info("Bot commands synced with Telegram API.")
     except Exception as e:
         log.error(f"Command sync failed: {e}")
@@ -133,11 +128,11 @@ async def start_bot():
     print("   ENGINE IS ONLINE AND STABLE!        ")
     print("---------------------------------------")
     
-    await bot.run_until_disconnected()
+    # Kurigram mein run_until_disconnected ki jagah idle() use hota hai
+    await idle()
 
 if __name__ == "__main__":
     try:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(start_bot())
+        asyncio.run(start_bot())
     except KeyboardInterrupt:
         pass
