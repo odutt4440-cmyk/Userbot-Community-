@@ -8,19 +8,12 @@ from bot_instance import bot
 from core.session_manager import SessionManager
 from config import ADMIN_ID, LOG_GROUP, SUDO_USERS, UPI_ID
 
-from database import add_subscription, get_sudo_info, get_sub_info
-
-# Mapping for all 8 plans: Price, Full Name, and Days
-PLAN_MAP = {
-    "std_15": {"name": "Standard", "price": 10, "days": 15},
-    "std_30": {"name": "Standard", "price": 30, "days": 30},
-    "emp_15": {"name": "Empire", "price": 15, "days": 15},
-    "emp_30": {"name": "Empire", "price": 35, "days": 30},
-    "u_std_15": {"name": "Ultra Standard", "price": 50, "days": 15},
-    "u_std_30": {"name": "Ultra Standard", "price": 95, "days": 30},
-    "u_emp_15": {"name": "Ultra Empire", "price": 55, "days": 15},
-    "u_emp_30": {"name": "Ultra Empire", "price": 100, "days": 30},
-}
+from database import (
+    add_subscription, 
+    get_sudo_info, 
+    get_sub_info,
+    get_plan
+)
 
 # Tracking users: {user_id: plan_key}
 WAITING_FOR_PAYMENT = {}
@@ -33,11 +26,15 @@ async def can_user_approve(user_id):
         return True
     return False
 
-# --- 1. SHOW PAYMENT INFO (Kurigram + Dynamic QR) ---
+# --- 1. SHOW PAYMENT INFO (Kurigram + Dynamic QR from DB) ---
 async def show_payment_info(message, plan_key):
     user_id = message.from_user.id
-    plan = PLAN_MAP.get(plan_key)
-    if not plan: return
+    
+    # 🔥 DB se plan fetch karo (no more hardcoded PLAN_MAP)
+    plan = await get_plan(plan_key)
+    if not plan or not plan.get("active", True):
+        await message.reply("⚠️ This plan is currently unavailable.")
+        return
 
     WAITING_FOR_PAYMENT[user_id] = plan_key
     
@@ -53,15 +50,14 @@ async def show_payment_info(message, plan_key):
     is_ultra = "Ultra" in plan['name']
     amount = plan['price']
     
-    # 🔥 DYNAMIC QR (amount ke saath)
+    # 🔥 DYNAMIC QR (amount DB se aaya)
     qr_filename = f"qr_{user_id}_{plan_key}.png"
     try:
         qr = SPLQR(name="Empire Userbot", upi_id=UPI_ID)
-        qr.generate(amount=amount)  # spl-qr amount ke saath QR banata hai [citation:13]
-        # spl-qr default file save karta hai, rename karo
+        qr.generate(amount=amount)
         if os.path.exists("qr.png"):
             os.rename("qr.png", qr_filename)
-        elif os.path.exists(f"{UPI_ID}.png"): # kabhi kabhi UPI ID naam se save karta hai
+        elif os.path.exists(f"{UPI_ID}.png"):
             os.rename(f"{UPI_ID}.png", qr_filename)
     except Exception as e:
         print(f"QR Generate Error: {e}")
@@ -93,7 +89,7 @@ async def show_payment_info(message, plan_key):
                 caption=pay_text,
                 reply_markup=cancel_btn
             )
-            os.remove(qr_filename)  # Cleanup
+            os.remove(qr_filename)
         else:
             await bot.send_message(
                 message.chat.id,
@@ -115,7 +111,9 @@ async def receive_screenshot(client, message):
     
     if user_id in WAITING_FOR_PAYMENT:
         plan_key = WAITING_FOR_PAYMENT[user_id]
-        plan = PLAN_MAP[plan_key]
+        plan = await get_plan(plan_key)
+        if not plan:
+            return
         user_name = message.from_user.first_name or "User"
         username = message.from_user.username or "N/A"
         
@@ -138,17 +136,16 @@ async def receive_screenshot(client, message):
         )
         
         if LOG_GROUP:
-            # Native Kurigram colored buttons — photo ke saath ek hi message
             admin_buttons = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
                     f"✅ Approve {plan['days']}d", 
                     callback_data=f"appr_{plan_key}_{user_id}",
-                    style=ButtonStyle.SUCCESS  # Green [citation:1]
+                    style=ButtonStyle.SUCCESS
                 )],
                 [InlineKeyboardButton(
                     "❌ Reject", 
                     callback_data=f"reject_{user_id}",
-                    style=ButtonStyle.DANGER   # Red [citation:1]
+                    style=ButtonStyle.DANGER
                 )]
             ])
             
@@ -161,12 +158,11 @@ async def receive_screenshot(client, message):
                 )
             except Exception as e:
                 print(f"Admin Log Error: {e}")
-                # Fallback: text only
                 await bot.send_message(LOG_GROUP, admin_text, reply_markup=admin_buttons)
         
         del WAITING_FOR_PAYMENT[user_id]
 
-# --- 3. SUDO APPROVAL LOGIC ---
+# --- 3. SUDO APPROVAL LOGIC (DB-connected) ---
 @bot.on_callback_query(filters.regex(r"^appr_(\w+)_(\d+)$"))
 async def approve_payment(client, query):
     if not await can_user_approve(query.from_user.id):
@@ -185,7 +181,8 @@ async def approve_payment(client, query):
             show_alert=True
         )
 
-    plan_info = PLAN_MAP.get(plan_key)
+    # 🔥 DB se plan fetch karo (latest price/days)
+    plan_info = await get_plan(plan_key)
     if not plan_info:
         return await query.answer("❌ Error: Invalid Plan Key.", show_alert=True)
 
