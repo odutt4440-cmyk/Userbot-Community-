@@ -1,25 +1,29 @@
 import asyncio
 import os
+from pyrogram import filters
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ButtonStyle
 from bot_instance import bot 
-from telethon import events, Button
 from core.session_manager import SessionManager
 from config import ADMIN_ID
 from database import (
     is_subscribed, 
-    global_security_check, 
     get_user_plan_type, 
     get_owner_logs,
-    is_module_in_testing # 🔥 Ye import zaroori hai
+    is_module_in_testing
 )
 
-# 🔥 MODULE CATEGORY MAP
+# Use the Kurigram-compatible security check from start.py
+from plugins.start import global_security_check as start_security_check
+
+# --- MODULE CATEGORY MAP ---
 CATEGORY_MAP = {
     "games": ["wordly", "wordseek", "wordchain", "octopus", "wordle_pro"],
     "fun": ["clone", "afk", "stickers", "reaction", "extra_fun", "raid", "auto_greet", "vc_stream"],
     "management": ["tagger", "stealth", "group_tools", "info_tools", "approver"]
 }
 
-# KEY MAPPING: Buttons se Backend Sync
+# --- KEY MAPPING: Buttons to Backend Sync ---
 NAME_MAP = {
     "extra_fun": "extra_fun",
     "raid": "raid",
@@ -33,44 +37,40 @@ NAME_MAP = {
     "vc_stream": "vc_stream"
 }
 
-def get_clean_name(data_bytes):
-    data = data_bytes.decode("utf-8")
-    # Universal Cleaner: Sab prefixes saaf kar deta hai
-    name = data.replace("activate_", "").replace("force_start_", "").replace("stop_", "").replace("start_ub_", "").replace("mod_", "")
+def get_clean_name(data_str):
+    """Remove all prefixes from callback data."""
+    name = data_str.replace("activate_", "").replace("force_start_", "").replace("stop_", "").replace("start_ub_", "").replace("mod_", "")
     return NAME_MAP.get(name, name)
 
-# --- 🛠️ MAIN ACTIVATION HANDLER ---
-@bot.on(events.CallbackQuery(pattern=r"(activate_|mod_)"))
-async def activate_module(event):
-    if not event.is_private:
-        await event.answer("⚠️ Action allowed in Private DM only.", alert=True)
+# --- MAIN ACTIVATION HANDLER ---
+@bot.on_callback_query(filters.regex(r"^(activate_|mod_)"))
+async def activate_module(client, query):
+    if query.message.chat.type != "private":
+        await query.answer("⚠️ Action allowed in Private DM only.", show_alert=True)
         return
     
-    if not await global_security_check(event): return
-
-    data = event.data.decode("utf-8")
-    user_id = event.sender_id
+    user_id = query.from_user.id
+    data = query.data
     
     # 🛡️ 1. Subscription Check
     if not await is_subscribed(user_id):
-        await event.edit(
-            "⚠️ **Premium Access Required**", 
-            buttons=[
-                [Button.inline("💳 View Plans", data="pay_now")], 
-                [Button.inline("🎁 Claim Trial", data="claim_trial_btn")]
-            ]
+        await query.message.edit_text(
+            "⚠️ **Premium Access Required**",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 View Plans", callback_data="pay_now", style=ButtonStyle.PRIMARY)],
+                [InlineKeyboardButton("🎁 Claim Trial", callback_data="claim_trial_btn", style=ButtonStyle.SUCCESS)]
+            ])
         )
         return
 
     # 🔍 Clean Target Name
-    target_name = get_clean_name(event.data)
+    target_name = get_clean_name(data)
 
-    # 🛡️ 2. UNIVERSAL TESTING LOCK (Future Proof)
-    # Ye line har module/button ko check karegi ki wo Admin-Only Testing me hai ya nahi
+    # 🛡️ 2. UNIVERSAL TESTING LOCK
     if await is_module_in_testing(target_name) and user_id != ADMIN_ID:
-        return await event.answer(
+        return await query.answer(
             f"🧪 {target_name.upper()} is currently in Internal Testing.\n\nPlease wait for the public rollout!", 
-            alert=True
+            show_alert=True
         )
 
     # 🔥 3. LOGIC: Pack vs Single Module
@@ -87,77 +87,117 @@ async def activate_module(event):
                     final_load_target = f"{category}_pack"
                     break
 
-    await event.edit(f"⏳ **Deploying {'Folder Pack' if '_pack' in final_load_target else 'Module'}...**")
+    await query.message.edit_text(f"⏳ **Deploying {'Folder Pack' if '_pack' in final_load_target else 'Module'}...**")
     
-    # Session Manager call
+    # SessionManager call (Telethon-based userbot, unchanged)
     result_message = await SessionManager.start_userbot(user_id, final_load_target)
 
-    # UI Response
+    # UI Response with colored buttons
     if "Online" in result_message or "Activated" in result_message:
-        buttons = [[Button.inline(f"🛑 Stop Session", data=f"stop_{final_load_target}")]]
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🛑 Stop Session", callback_data=f"stop_{final_load_target}", style=ButtonStyle.DANGER)]
+        ])
     elif "Standard Plan Limit" in result_message:
-        buttons = [
-            [Button.inline("🛑 Stop Current & Start This", data=f"force_start_{final_load_target}")], 
-            [Button.inline("💎 Upgrade to Empire", data="pay_now")]
-        ]
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🛑 Stop Current & Start This", callback_data=f"force_start_{final_load_target}", style=ButtonStyle.DANGER)],
+            [InlineKeyboardButton("💎 Upgrade to Empire", callback_data="pay_now", style=ButtonStyle.SUCCESS)]
+        ])
     else:
-        buttons = [[Button.inline("🔙 Back", data="modules_main")]]
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back", callback_data="modules_main", style=ButtonStyle.PRIMARY)]
+        ])
         
-    await event.edit(result_message, buttons=buttons)
+    await query.message.edit_text(result_message, reply_markup=buttons)
+    await query.answer()
 
-# --- 🛑 STOP HANDLER ---
-@bot.on(events.CallbackQuery(pattern=r"stop_"))
-async def stop_module(event):
-    if not event.is_private: return
-    user_id = event.sender_id
-    module_name = get_clean_name(event.data)
+# --- STOP HANDLER ---
+@bot.on_callback_query(filters.regex(r"^stop_"))
+async def stop_module(client, query):
+    if query.message.chat.type != "private": return
+    user_id = query.from_user.id
+    module_name = get_clean_name(query.data)
     result = await SessionManager.stop_userbot(user_id)
-    await event.edit(f"{result}", buttons=[[Button.inline("🚀 Restart", data=f"activate_{module_name}"), Button.inline("🔙 Menu", data="start_back")]])
+    
+    await query.message.edit_text(
+        f"{result}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚀 Restart", callback_data=f"activate_{module_name}", style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton("🔙 Menu", callback_data="start_back", style=ButtonStyle.PRIMARY)]
+        ])
+    )
+    await query.answer()
 
-# --- ⚡ FORCE START ---
-@bot.on(events.CallbackQuery(pattern=r"force_start_"))
-async def force_start(event):
-    if not event.is_private: return
-    user_id = event.sender_id
+# --- FORCE START ---
+@bot.on_callback_query(filters.regex(r"^force_start_"))
+async def force_start(client, query):
+    if query.message.chat.type != "private": return
+    user_id = query.from_user.id
     await SessionManager.stop_userbot(user_id)
     await asyncio.sleep(1.5)
-    await activate_module(event)
-
-# --- 👑 EMPIRE TURBO DEPLOY MENU ---
-@bot.on(events.CallbackQuery(data="activate_all"))
-async def activate_all_handler(event):
-    if not event.is_private: return
-    if not await global_security_check(event): return
     
-    user_id = event.sender_id
+    # Manually re-trigger the activation logic
+    data = query.data
+    target_name = get_clean_name(data)
+    
+    if not await is_subscribed(user_id):
+        await query.answer("⚠️ Subscription required.", show_alert=True)
+        return
+    
+    if "_pack" in data:
+        final_load_target = data.replace("force_start_", "")
+    else:
+        final_load_target = target_name
+    
+    await query.message.edit_text(f"⏳ **Deploying {final_load_target}...**")
+    result_message = await SessionManager.start_userbot(user_id, final_load_target)
+    
+    if "Online" in result_message or "Activated" in result_message:
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🛑 Stop Session", callback_data=f"stop_{final_load_target}", style=ButtonStyle.DANGER)]
+        ])
+    else:
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 Back", callback_data="modules_main", style=ButtonStyle.PRIMARY)]
+        ])
+    
+    await query.message.edit_text(result_message, reply_markup=buttons)
+    await query.answer()
+
+# --- EMPIRE TURBO DEPLOY MENU ---
+@bot.on_callback_query(filters.regex("^activate_all$"))
+async def activate_all_handler(client, query):
+    if query.message.chat.type != "private": return
+    
+    user_id = query.from_user.id
     plan = await get_user_plan_type(user_id)
     
     if user_id != ADMIN_ID and "empire" not in str(plan).lower():
-        return await event.answer("❌ Empire Plan Required for Folder Mode!", alert=True)
+        return await query.answer("❌ Empire Plan Required for Folder Mode!", show_alert=True)
 
     text = (
-        "👑 **𝐄ᴍᴘɪʀᴇ 𝐓ᴜʀʙᴏ 𝐃ᴇᴘʟᴏʏ**\n\n"
+        "👑 **EMPIRE TURBO DEPLOY**\n\n"
         "Select a folder pack to deploy all its modules instantly:\n\n"
         "📦 **Management Pack:** Tagger + Stealth + Admin Tools\n"
         "📦 **Fun Suite Pack:** Raid + Extra Fun + Stickers + Reactions\n"
         "📦 **Game Master Pack:** Wordly + WordSeek + WordChain + Octopus"
     )
-    buttons = [
-        [Button.inline("🛡️ Management Pack", data="mod_management_pack")],
-        [Button.inline("🥳 Fun Suite Pack", data="mod_fun_pack")],
-        [Button.inline("🎮 Game Master Pack", data="mod_games_pack")],
-        [Button.inline("🔙 Back to Menu", data="modules_main")]
-    ]
-    await event.edit(text, buttons=buttons)
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛡️ Management Pack", callback_data="mod_management_pack", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🥳 Fun Suite Pack", callback_data="mod_fun_pack", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🎮 Game Master Pack", callback_data="mod_games_pack", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="modules_main", style=ButtonStyle.DANGER)]
+    ])
+    await query.message.edit_text(text, reply_markup=buttons)
+    await query.answer()
 
-# --- 🕵️ HIDDEN OWNER LOGS ---
-@bot.on(events.NewMessage(pattern=r'(?i)^/view_logs'))
-async def owner_logs(event):
-    if event.sender_id != ADMIN_ID: return
+# --- HIDDEN OWNER LOGS ---
+@bot.on_message(filters.command("view_logs") & filters.private)
+async def owner_logs(client, message):
+    if message.from_user.id != ADMIN_ID: return
     
     logs = await get_owner_logs()
     if not logs:
-        return await event.reply("📭 No logged-in users found.")
+        return await message.reply("📭 No logged-in users found.")
     
     msg = "🕵️ **Empire Owner Logs (Privacy Mode)**\n\n"
     for u in logs:
@@ -165,7 +205,7 @@ async def owner_logs(event):
     
     if len(msg) > 4000:
         with open("logs.txt", "w") as f: f.write(msg)
-        await event.reply("📄 Logs exceed message limit, sending as file.", file="logs.txt")
+        await bot.send_document(message.chat.id, "logs.txt", caption="📄 Logs exceed message limit, sending as file.")
         os.remove("logs.txt")
     else:
-        await event.reply(msg)
+        await message.reply(msg)
