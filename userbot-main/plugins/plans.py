@@ -1,66 +1,128 @@
+from pyrogram import filters
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ButtonStyle
 from bot_instance import bot
-from telethon import events, Button
-from database import global_security_check, is_plan_available
+from database import (
+    global_security_check, 
+    is_plan_available,
+    get_all_active_plans,
+    get_plan
+)
 
-# --- UNIVERSAL PLAN MENU LOGIC ---
-async def send_plans_menu(event, edit=False):
-    plan_text = (
-        "💎 **Empire Userbot Premium Plans**\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "✨ **Standard Tiers** (Self Session | 1 Module)\n"
-        "• 15 Days ➔ **₹10** | 30 Days ➔ **₹30**\n\n"
-        "🚀 **Empire Tiers** (Self Session | Multi Module)\n"
-        "• 15 Days ➔ **₹15** | 30 Days ➔ **₹35**\n\n"
-        "🥇 **Ultra Premium** (We Provide Account ID)\n"
-        "• Standard (15d) ➔ **₹50** | (30d) ➔ **₹95**\n"
-        "• Empire (15d) ➔ **₹55** | (30d) ➔ **₹100**\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🎁 **New User?** Claim your 24h Free Trial!\n"
-        "👇 Select a plan to get payment details:"
-    )
-
-    buttons = [
-        [Button.inline("💳 Standard (15d)", data="buy_std_15"), Button.inline("💳 Standard (30d)", data="buy_std_30")],
-        [Button.inline("🚀 Empire (15d)", data="buy_emp_15"), Button.inline("🚀 Empire (30d)", data="buy_emp_30")],
-        [Button.inline("🥇 Ultra Std (15d)", data="buy_u_std_15"), Button.inline("🥇 Ultra Std (30d)", data="buy_u_std_30")],
-        [Button.inline("👑 Ultra Emp (15d)", data="buy_u_emp_15"), Button.inline("👑 Ultra Emp (30d)", data="buy_u_emp_30")],
-        [Button.inline("🔙 Back to Menu", data="start_back")]
-    ]
-
+# --- UNIVERSAL PLAN MENU LOGIC (Dynamic from DB) ---
+async def send_plans_menu(message, edit=False):
+    # DB se saare active plans fetch karo
+    plans = await get_all_active_plans()
+    
+    if not plans:
+        text = "⚠️ **No plans available right now.**\nPlease check back later."
+        if edit:
+            await message.edit_text(text)
+        else:
+            await message.reply(text)
+        return
+    
+    # Tier ke hisaab se group karo
+    tiers = {
+        "standard": {"title": "✨ **Standard Tiers** (Self Session | 1 Module)", "items": []},
+        "empire": {"title": "🚀 **Empire Tiers** (Self Session | Multi Module)", "items": []},
+        "ultra_standard": {"title": "🥇 **Ultra Premium** (We Provide Account ID)", "items": []},
+        "ultra_empire": {"title": "👑 **Ultra Empire** (We Provide Account ID)", "items": []},
+    }
+    
+    for p in plans:
+        tier = p.get("tier", "standard")
+        if tier in tiers:
+            tiers[tier]["items"].append(p)
+    
+    # Dynamic text generate
+    plan_text = "💎 **Empire Userbot Premium Plans**\n" + "━" * 20 + "\n\n"
+    
+    for tier_key, tier_data in tiers.items():
+        if not tier_data["items"]:
+            continue
+        plan_text += f"{tier_data['title']}\n"
+        for p in tier_data["items"]:
+            plan_text += f"• {p['days']} Days ➔ **₹{p['price']}**\n"
+        plan_text += "\n"
+    
+    plan_text += "━" * 20 + "\n"
+    plan_text += "🎁 **New User?** Claim your 24h Free Trial!\n"
+    plan_text += "👇 Select a plan to get payment details:"
+    
+    # Buttons dynamically generate
+    buttons = []
+    row = []
+    for p in plans:
+        # Style: standard = PRIMARY, empire = SUCCESS, ultra = DANGER (premium)
+        tier = p.get("tier", "standard")
+        if tier == "standard":
+            style = ButtonStyle.PRIMARY
+        elif tier == "empire":
+            style = ButtonStyle.SUCCESS
+        else:
+            style = ButtonStyle.DANGER
+        
+        label = f"{p['name'][:8]} ({p['days']}d) - ₹{p['price']}"
+        row.append(InlineKeyboardButton(
+            label,
+            callback_data=f"buy_{p['plan_key']}",
+            style=style
+        ))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    
+    # Back button
+    buttons.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="start_back", style=ButtonStyle.PRIMARY)])
+    
+    markup = InlineKeyboardMarkup(buttons)
+    
     if edit:
-        await event.edit(plan_text, buttons=buttons)
+        await message.edit_text(plan_text, reply_markup=markup)
     else:
-        await event.reply(plan_text, buttons=buttons)
+        await message.reply(plan_text, reply_markup=markup)
 
 # --- COMMAND HANDLER: /plan ---
-@bot.on(events.NewMessage(pattern=r'(?i)^/plan'))
-async def plans_cmd(event):
-    if not event.is_private: return
-    if not await global_security_check(event): return
-    await send_plans_menu(event, edit=False)
+@bot.on_message(filters.command("plan") & filters.private)
+async def plans_cmd(client, message):
+    # Use the Kurigram-specific security check from start.py
+    from plugins.start import global_security_check as start_security_check
+    if not await start_security_check(message): return
+    await send_plans_menu(message, edit=False)
 
 # --- BUTTON HANDLER: pay_now ---
-@bot.on(events.CallbackQuery(data="pay_now"))
-async def pay_callback(event):
-    if not await global_security_check(event): return
-    await send_plans_menu(event, edit=True)
+@bot.on_callback_query(filters.regex("^pay_now$"))
+async def pay_callback(client, query):
+    await send_plans_menu(query.message, edit=True)
+    await query.answer()
 
 # --- PLAN AVAILABILITY CHECKER ---
-@bot.on(events.CallbackQuery(pattern=r"buy_(\w+)"))
-async def check_and_pay(event):
-    if not await global_security_check(event): return
+@bot.on_callback_query(filters.regex(r"^buy_(\w+)$"))
+async def check_and_pay(client, query):
+    plan_key = query.matches[0].group(1)
     
-    plan_key = event.data.decode("utf-8").replace("buy_", "")
-    
-    # 🔥 THE DISABLE LOGIC: Check if admin turned this off
+    # Check 1: Setting-based toggle (existing)
     if not await is_plan_available(plan_key):
-        return await event.edit(
-            "⚠️ **Notice:** This specific plan is currently not available due to high demand.\n\n"
-            "Kindly connect with us through the **Support & Feedback** menu for manual requests.",
-            buttons=[[Button.inline("📢 Support & Feedback", data="support_main")], [Button.inline("🔙 View Other Plans", data="pay_now")]]
+        await query.message.edit_text(
+            "⚠️ **Notice:** This plan is currently unavailable.\n\n"
+            "Please contact us via **Support** for manual requests.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📢 Support", callback_data="support_main", style=ButtonStyle.PRIMARY)],
+                [InlineKeyboardButton("🔙 View Other Plans", callback_data="pay_now", style=ButtonStyle.PRIMARY)]
+            ])
         )
-
-    # Agar plan available hai, toh payment.py ke handler ko trigger karega
-    # (Humein payment.py me button pattern match update karna hoga)
+        return await query.answer()
+    
+    # Check 2: DB active field
+    plan = await get_plan(plan_key)
+    if not plan or not plan.get("active", True):
+        await query.answer("This plan is no longer available.", show_alert=True)
+        return
+    
+    # Trigger payment flow
     from plugins.payment import show_payment_info
-    await show_payment_info(event, plan_key)
+    await show_payment_info(query.message, plan_key)
+    await query.answer()
