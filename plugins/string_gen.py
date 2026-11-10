@@ -39,12 +39,11 @@ async def start_string_gen(client, query):
     await query.answer()
 
 # --- 2. INPUT HANDLER (Kurigram) ---
-# Hum group=-1 use kar rahe hain taaki ye handler sabse pehle chale
-@bot.on_message(filters.private & filters.text & ~filters.command(["start", "help", "commands", "plan", "admin", "modules"]))
+# 🔥 FIX: & ~filters.photo add kiya hai taaki ye photo ko ignore kare
+@bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "help", "commands", "plan", "admin", "modules"]))
 async def handle_gen_input(client, message):
     user_id = message.from_user.id
     
-    # Agar user is function ka wait nahi kar raha, toh chupchap return ho jao
     if user_id not in GEN_DATA:
         return
 
