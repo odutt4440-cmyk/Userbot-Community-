@@ -2,8 +2,8 @@ import os
 import asyncio
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ButtonStyle
 from pyrogram.errors import UserNotParticipant
-from richgram import rich_button, rich_button_row, rich_send
 from bot_instance import bot 
 from config import START_PIC, ADMIN_ID, LOG_GROUP, CHANNEL_LINK, MUST_JOIN
 from database import claim_trial, has_claimed_trial, get_setting, set_setting, get_user_plan_type, is_banned, get_ban_info, get_maintenance
@@ -28,10 +28,7 @@ BEAR_ASCII = """
 ⠀⠀⠀⠀⠀⠈⠉⠉⠀⠀⠀⠀⠀⠀⠉⠉⠀
 """
 
-# Photo caching handle
-START_MEDIA = None
-
-# --- HELPER: PRIVATE ONLY CHECK (Kurigram version) ---
+# --- HELPER: PRIVATE ONLY CHECK ---
 async def is_private_only(message):
     if message.chat.type != "private":
         await message.reply(
@@ -45,17 +42,15 @@ async def is_private_only(message):
         return False
     return True
 
-# --- HELPER: SECURITY & MAINTENANCE CHECK (Kurigram version) ---
+# --- HELPER: SECURITY & MAINTENANCE CHECK ---
 async def global_security_check(message):
     user_id = message.from_user.id
     
-    # 1. Maintenance Check (Admin is exempt)
     is_maint, maint_text = await get_maintenance()
     if is_maint and user_id != ADMIN_ID:
         await message.reply(f"🛠️ **Bot Under Maintenance**\n\n{maint_text}")
         return False
         
-    # 2. Ban Check
     if await is_banned(user_id):
         ban_info = await get_ban_info(user_id)
         reason = ban_info[1] if ban_info else "No reason provided."
@@ -64,26 +59,23 @@ async def global_security_check(message):
         
     return True
 
-# --- REAL FORCE JOIN CHECK (Kurigram native) ---
+# --- REAL FORCE JOIN CHECK ---
 async def check_user_joined(user_id):
-    """Asli API check. Agar join nahi kiya toh UserNotParticipant raise hoga."""
+    """Asli API check. UserNotParticipant raise hoga agar join nahi kiya."""
     if user_id == ADMIN_ID or not MUST_JOIN:
         return True
     
     try:
-        # Kurigram ka native method
         await bot.get_chat_member(MUST_JOIN, user_id)
         return True
     except UserNotParticipant:
         return False
     except Exception as e:
-        # Agar channel private hai ya bot admin nahi hai, toh fail-open (block mat karo)
         print(f"Force-join check error: {e}")
-        return True
+        return True  # fail-open
 
-# --- 1. MAIN MENU LOGIC (richgram colored buttons) ---
+# --- 1. MAIN MENU LOGIC (Native Kurigram Colored Buttons) ---
 async def send_start_menu(message, edit=False):
-    global START_MEDIA
     welcome_text = (
         "ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴜsᴇʀ ᴄᴏᴍᴍᴜɴɪᴛʏ!\n"
         "──────────────────\n"
@@ -91,25 +83,33 @@ async def send_start_menu(message, edit=False):
         "ᴇxᴘᴇʀɪᴇɴᴄᴇ ʜɪɢʜ-sᴘᴇᴇᴅ ɢᴀᴍᴇs, ʟᴇx-ғʀᴇᴇ ɪɴᴛᴇʀᴀᴄᴛɪᴏɴ ᴛᴏᴏʟs, ᴀɴᴅ ᴀᴅᴠᴀɴᴄᴇᴅ ᴍᴏᴅᴜʟᴇs ʀɪɢʜᴛ ᴀᴛ ʏᴏᴜʀ ғɪɴɢᴇʀᴛɪᴘs. ⚡🔥"
     )
     
-    # richgram buttons (colored)
-    buttons = (
-        rich_button_row(
-            rich_button("ᴇxᴛʀᴀᴄᴛ ᴍᴏᴅᴜʟᴇs", callback_data="modules_main", style="primary")
-        )
-        + rich_button_row(
-            rich_button("ᴄʟᴀɪᴍ 𝟽-ᴅᴀʏ ᴛʀɪᴀʟ", callback_data="claim_trial_btn", style="success")
-        )
-        + rich_button_row(
-            rich_button("sᴜᴘᴘᴏʀᴛ", callback_data="support_main", style="primary")
-        )
-        + rich_button_row(
-            rich_button("ʀᴜʟᴇs", callback_data="rules", style="danger"),
-            rich_button("ᴄʜᴀɴɴᴇʟ", url=CHANNEL_LINK, style="link")
-        )
-        + rich_button_row(
-            rich_button("ɢᴇɴᴇʀᴀᴛᴇ sᴇssɪᴏɴ", callback_data="gen_string_internal", style="success")
-        )
-    )
+    # Native Kurigram ButtonStyle — koi richgram nahi
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "ᴇxᴛʀᴀᴄᴛ ᴍᴏᴅᴜʟᴇs", 
+            callback_data="modules_main",
+            style=ButtonStyle.PRIMARY
+        )],
+        [InlineKeyboardButton(
+            "ᴄʟᴀɪᴍ 𝟽-ᴅᴀʏ ᴛʀɪᴀʟ", 
+            callback_data="claim_trial_btn",
+            style=ButtonStyle.SUCCESS
+        )],
+        [InlineKeyboardButton(
+            "sᴜᴘᴘᴏʀᴛ", 
+            callback_data="support_main",
+            style=ButtonStyle.PRIMARY
+        )],
+        [
+            InlineKeyboardButton("ʀᴜʟᴇs", callback_data="rules", style=ButtonStyle.DANGER),
+            InlineKeyboardButton("ᴄʜᴀɴɴᴇʟ", url=CHANNEL_LINK)
+        ],
+        [InlineKeyboardButton(
+            "ɢᴇɴᴇʀᴀᴛᴇ sᴇssɪᴏɴ", 
+            callback_data="gen_string_internal",
+            style=ButtonStyle.SUCCESS
+        )]
+    ])
 
     try:
         cached_id = await get_setting("START_PIC_ID")
@@ -117,29 +117,28 @@ async def send_start_menu(message, edit=False):
             cached_id = None
 
         if edit:
-            # richgram edit ke liye alag method hai, par simplicity ke liye text edit karte hain
-            await message.edit_text(welcome_text)
-            # Note: richgram edit alag se handle karna padega, abhi ke liye text-only edit
+            await message.edit_text(welcome_text, reply_markup=buttons)
         else:
-            # Photo ke saath rich message bhejna richgram se possible hai
-            await rich_send(
-                bot,
+            # Photo ke saath hi buttons — ek hi message
+            sent = await bot.send_photo(
                 message.chat.id,
-                welcome_text + buttons,
-                reply_to_message_id=message.id
+                START_PIC,
+                caption=welcome_text,
+                reply_markup=buttons
             )
+            if not cached_id and sent and sent.photo:
+                await set_setting("START_PIC_ID", str(sent.photo.file_id))
     except Exception as e:
         print(f"Start Menu Error: {e}")
-        await message.reply(welcome_text)
+        await message.reply(welcome_text, reply_markup=buttons)
 
-# --- 2. COMMAND HANDLERS (Kurigram) ---
+# --- 2. COMMAND HANDLERS ---
 @bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message):
     if not await global_security_check(message): return
     
     user_id = message.from_user.id
     
-    # REAL FORCE JOIN CHECK
     is_joined = await check_user_joined(user_id)
     
     if not is_joined:
@@ -153,13 +152,12 @@ async def start_handler(client, message):
             START_PIC,
             caption=join_text,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📢 Join Community", url=CHANNEL_LINK)],
-                [InlineKeyboardButton("✅ Verify & Continue", callback_data="verify_join")]
+                [InlineKeyboardButton("📢 Join Community", url=CHANNEL_LINK, style=ButtonStyle.PRIMARY)],
+                [InlineKeyboardButton("✅ Verify & Continue", callback_data="verify_join", style=ButtonStyle.SUCCESS)]
             ])
         )
         return
 
-    # Bear Animation
     anim_msg = await message.reply(f"<code>{BEAR_ASCII}</code>")
     await asyncio.sleep(2.5)
     await anim_msg.delete()
@@ -176,7 +174,7 @@ async def help_handler(client, message):
     await message.reply(
         help_text,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⚙️ Open Modules", callback_data="modules_main")]
+            [InlineKeyboardButton("⚙️ Open Modules", callback_data="modules_main", style=ButtonStyle.PRIMARY)]
         ])
     )
 
@@ -193,33 +191,30 @@ async def modules_main_logic(message, edit=False):
         "while Empire users can deploy **Whole Folder Packs** at once!"
     )
     
-    buttons = (
-        rich_button_row(
-            rich_button("🚀 ᴇᴍᴘɪʀᴇ ᴛᴜʀʙᴏ ᴅᴇᴘʟᴏʏ (ғᴏʟᴅᴇʀ ᴍᴏᴅᴇ)", callback_data="empire_packs", style="primary")
-        )
-        + rich_button_row(
-            rich_button("🛡️ Management", callback_data="management_ub", style="success"),
-            rich_button("🥳 Fun Tools", callback_data="fun_ub", style="success")
-        )
-        + rich_button_row(
-            rich_button("🎮 Game Bots", callback_data="games_ub", style="primary")
-        )
-        + rich_button_row(
-            rich_button("🔙 Back to Menu", callback_data="start_back", style="danger")
-        )
-    )
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "🚀 ᴇᴍᴘɪʀᴇ ᴛᴜʀʙᴏ ᴅᴇᴘʟᴏʏ (ғᴏʟᴅᴇʀ ᴍᴏᴅᴇ)", 
+            callback_data="empire_packs",
+            style=ButtonStyle.PRIMARY
+        )],
+        [
+            InlineKeyboardButton("🛡️ Management", callback_data="management_ub", style=ButtonStyle.SUCCESS),
+            InlineKeyboardButton("🥳 Fun Tools", callback_data="fun_ub", style=ButtonStyle.SUCCESS)
+        ],
+        [InlineKeyboardButton("🎮 Game Bots", callback_data="games_ub", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="start_back", style=ButtonStyle.DANGER)]
+    ])
     
     if edit:
-        await message.edit_text(text)
+        await message.edit_text(text, reply_markup=buttons)
     else:
-        await rich_send(bot, message.chat.id, text + buttons, reply_to_message_id=message.id)
+        await message.reply(text, reply_markup=buttons)
 
-# --- 4. CALLBACK HANDLERS (Kurigram) ---
+# --- 4. CALLBACK HANDLERS ---
 @bot.on_callback_query(filters.regex("^modules_main$"))
 async def modules_callback(client, query):
-    await query.message.edit_text("Loading...")
-    # Note: richgram edit abhi text-only hai, isliye simple edit
     await modules_main_logic(query.message, edit=True)
+    await query.answer()
 
 @bot.on_callback_query(filters.regex("^start_back$"))
 async def start_back_callback(client, query):
@@ -230,7 +225,6 @@ async def start_back_callback(client, query):
 async def verify_join_callback(client, query):
     user_id = query.from_user.id
     
-    # REAL CHECK: API se verify karo
     joined = await check_user_joined(user_id)
     
     if not joined:
@@ -244,7 +238,6 @@ async def verify_join_callback(client, query):
     except:
         pass
     
-    # Bear sequence
     anim = await bot.send_message(query.message.chat.id, "<code>🔓 Initializing...</code>")
     await asyncio.sleep(1)
     await anim.edit_text(f"<code>{BEAR_ASCII}</code>")
@@ -265,7 +258,7 @@ async def trial_handler(client, query):
         await query.message.edit_text(
             "🎁 **Free Trial Activated!**\n\nAccess granted for 24 hours. Start your userbot now! 🚀",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⚙️ Open Modules", callback_data="modules_main")]
+                [InlineKeyboardButton("⚙️ Open Modules", callback_data="modules_main", style=ButtonStyle.PRIMARY)]
             ])
         )
     else:
