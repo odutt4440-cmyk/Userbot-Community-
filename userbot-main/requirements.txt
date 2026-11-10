@@ -1,0 +1,13 @@
+Telethon==1.44.0
+py-tgcalls @ git+https://github.com/pytgcalls/pytgcalls.git
+ntgcalls
+motor==3.7.1
+pymongo==4.18.0
+dnspython
+certifi
+python-dotenv
+cryptography
+requests
+aiohttp
+pillow
+wordfreq
