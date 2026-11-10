@@ -86,7 +86,7 @@ async def start_support_input(client, query):
     await query.answer()
 
 # --- 4. INPUT HANDLER (FIXED FOR CLASH) ---
-@bot.on_message(filters.private & filters.text & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]), group=-2)
+@bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]))
 async def handle_support_message(client, message):
     user_id = message.from_user.id
     
