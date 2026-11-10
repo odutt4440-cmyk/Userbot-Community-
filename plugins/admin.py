@@ -383,7 +383,7 @@ async def price_plan_selected(client, query):
 # --- SINGLE TEXT INPUT HANDLER ---
 # ============================================================
 
-@bot.on_message(filters.private & filters.text & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]))
+@bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]))
 async def handle_admin_inputs(client, message):
     user_id = message.from_user.id
     
