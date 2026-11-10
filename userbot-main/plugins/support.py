@@ -85,53 +85,56 @@ async def start_support_input(client, query):
     )
     await query.answer()
 
-# --- 4. INPUT HANDLER ---
-@bot.on_message(filters.private & filters.text)
+# --- 4. INPUT HANDLER (FIXED FOR CLASH) ---
+@bot.on_message(filters.private & filters.text & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]), group=-2)
 async def handle_support_message(client, message):
     user_id = message.from_user.id
     
-    if user_id in SUPPORT_WAITING:
-        if message.text.startswith('/'): return 
-        
-        # Quick security check
-        is_maint, maint_text = await get_maintenance()
-        if is_maint and user_id != ADMIN_ID:
-            await message.reply(f"🛠️ **Bot Under Maintenance**\n\n{maint_text}")
-            del SUPPORT_WAITING[user_id]
-            return
-        if await is_banned(user_id):
-            await message.reply("🚫 **Access Denied!** You are banned from using this bot.")
-            del SUPPORT_WAITING[user_id]
-            return
-
-        report_type = SUPPORT_WAITING[user_id]
-        report_text = message.text
-        name = message.from_user.first_name or "User"
-        username = f"@{message.from_user.username}" if message.from_user.username else "N/A"
-        time_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        log_message = (
-            f"📢 **NEW COMMUNITY SUBMISSION**\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📌 **Category:** `{report_type}`\n"
-            f"👤 **From:** {name} ({username})\n"
-            f"🆔 **User ID:** `{user_id}`\n"
-            f"⏰ **Sent At:** `{time_now}`\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📝 **Message Content:**\n{report_text}"
-        )
-
-        if LOG_GROUP:
-            try:
-                await bot.send_message(LOG_GROUP, log_message)
-                await message.reply(
-                    "✅ **Submission Successful!**\n\n"
-                    "Thank you for your feedback. Our team has been notified.",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🔙 Back to Menu", callback_data="start_back", style=ButtonStyle.PRIMARY)]
-                    ])
-                )
-            except Exception as e:
-                await message.reply(f"❌ **Error:** Failed to reach admins. `{e}`")
-        
+    # Agar user support ka wait nahi kar raha toh return karo
+    if user_id not in SUPPORT_WAITING:
+        return
+    
+    if message.text.startswith('/'): return 
+    
+    # Quick security check
+    is_maint, maint_text = await get_maintenance()
+    if is_maint and user_id != ADMIN_ID:
+        await message.reply(f"🛠️ **Bot Under Maintenance**\n\n{maint_text}")
         del SUPPORT_WAITING[user_id]
+        return
+    if await is_banned(user_id):
+        await message.reply("🚫 **Access Denied!** You are banned from using this bot.")
+        del SUPPORT_WAITING[user_id]
+        return
+
+    report_type = SUPPORT_WAITING[user_id]
+    report_text = message.text
+    name = message.from_user.first_name or "User"
+    username = f"@{message.from_user.username}" if message.from_user.username else "N/A"
+    time_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    log_message = (
+        f"📢 **NEW COMMUNITY SUBMISSION**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📌 **Category:** `{report_type}`\n"
+        f"👤 **From:** {name} ({username})\n"
+        f"🆔 **User ID:** `{user_id}`\n"
+        f"⏰ **Sent At:** `{time_now}`\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📝 **Message Content:**\n{report_text}"
+    )
+
+    if LOG_GROUP:
+        try:
+            await bot.send_message(LOG_GROUP, log_message)
+            await message.reply(
+                "✅ **Submission Successful!**\n\n"
+                "Thank you for your feedback. Our team has been notified.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔙 Back to Menu", callback_data="start_back", style=ButtonStyle.PRIMARY)]
+                ])
+            )
+        except Exception as e:
+            await message.reply(f"❌ **Error:** Failed to reach admins. `{e}`")
+    
+    del SUPPORT_WAITING[user_id]
