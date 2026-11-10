@@ -4,7 +4,7 @@ from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
 from bot_instance import bot
-# Telethon imports (session generate karne ke liye)
+# Telethon imports
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import (
@@ -23,10 +23,6 @@ GEN_DATA = {}
 # --- 1. START GENERATION ---
 @bot.on_callback_query(filters.regex("^gen_string_internal$"))
 async def start_string_gen(client, query):
-    if query.message.chat.type != "private":
-        await query.answer("⚠️ This tool only works in Private DM.", show_alert=True)
-        return
-
     user_id = query.from_user.id
     GEN_DATA[user_id] = {"step": "phone"}
     
@@ -43,10 +39,16 @@ async def start_string_gen(client, query):
     await query.answer()
 
 # --- 2. INPUT HANDLER (Kurigram) ---
-@bot.on_message(filters.private & filters.text)
+# Hum group=-1 use kar rahe hain taaki ye handler sabse pehle chale
+@bot.on_message(filters.private & filters.text & ~filters.command(["start", "help", "commands", "plan", "admin", "modules"]))
 async def handle_gen_input(client, message):
     user_id = message.from_user.id
-    if user_id not in GEN_DATA or message.text.startswith('/'):
+    
+    # Agar user is function ka wait nahi kar raha, toh chupchap return ho jao
+    if user_id not in GEN_DATA:
+        return
+
+    if message.text.startswith('/'):
         return
 
     state = GEN_DATA[user_id]
@@ -55,6 +57,8 @@ async def handle_gen_input(client, message):
 
     # --- STEP 1: RECEIVE PHONE ---
     if step == "phone":
+        print(f"[DEBUG] Phone number received from {user_id}: {text}")
+        
         clean_phone = re.sub(r'[\s\-()]', '', text)
         
         if not clean_phone.startswith('+'):
@@ -79,6 +83,7 @@ async def handle_gen_input(client, message):
         await tmp_client.connect()
         
         try:
+            print(f"[DEBUG] Sending code request for {clean_phone}...")
             hash_obj = await tmp_client.send_code_request(clean_phone)
             state["client"] = tmp_client
             state["hash"] = hash_obj.phone_code_hash
@@ -100,6 +105,7 @@ async def handle_gen_input(client, message):
             await tmp_client.disconnect()
             del GEN_DATA[user_id]
         except Exception as e:
+            print(f"[DEBUG] Error: {e}")
             await msg.edit_text(f"❌ **Error:** `{str(e)}` \nPlease try again later.")
             await tmp_client.disconnect()
             del GEN_DATA[user_id]
@@ -119,7 +125,6 @@ async def handle_gen_input(client, message):
             
             await save_user_session(user_id, string, phone)
             
-            # login.py ki waiting list se user ko hata do
             try:
                 from plugins.login import WAITING_FOR_STR
                 if user_id in WAITING_FOR_STR:

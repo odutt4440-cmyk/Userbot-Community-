@@ -26,7 +26,7 @@ LOG_GROUP = int(os.getenv("LOG_GROUP", "0"))
 
 BACKUP_CHAT = int(os.getenv("BACKUP_CHAT", "0"))
 
-UPI_ID = "sparshbaniya@fam"
+UPI_ID = "duttaashish@fam"
 PAY_QR = "assets/qr.jpg"
 # --- Sudo Users System ---
 # .env me IDs aise likho: SUDO_USERS=123456 789012 554433 (space dekar)

@@ -35,6 +35,9 @@ from database import (
     update_plan_days,
     toggle_plan_active,
     seed_default_plans,
+    add_sudo,
+    remove_sudo,
+    list_all_sudos,
 )
 
 # --- HELPER: STAFF PERMISSION CHECK ---
@@ -45,57 +48,105 @@ async def check_power(user_id, power_type):
     return info[0] == 1 if power_type == 'ban' else info[1] == 1
 
 # ============================================================
-# --- STATE TRACKING (for pricing updates) ---
+# --- STATE TRACKING ---
 # ============================================================
-# {user_id: {"action": "price"/"days", "plan_key": "std_15"}}
 AWAITING_PLAN_INPUT = {}
+AWAITING_SUDO_INPUT = {}
 
 # ============================================================
-# --- SUDO PANEL ---
+# --- DYNAMIC ADMIN PANEL (Based on Permissions) ---
 # ============================================================
 
-SUDO_PANEL_BUTTONS = [
-    ("🚫 Ban User", "panel_ban", ButtonStyle.DANGER),
-    ("✅ Unban User", "panel_unban", ButtonStyle.SUCCESS),
-    ("👑 Add Sudo", "panel_addsudo", ButtonStyle.SUCCESS),
-    ("❌ Remove Sudo", "panel_rmsudo", ButtonStyle.DANGER),
-    ("📢 Broadcast", "panel_broadcast", ButtonStyle.PRIMARY),
-    ("🛠️ Maintenance", "panel_maint", ButtonStyle.DANGER),
-    ("📊 Stats", "panel_stats", ButtonStyle.SUCCESS),
-    ("📋 Sudolist", "panel_sudolist", ButtonStyle.PRIMARY),
-    ("💳 Approve Plan", "panel_approve", ButtonStyle.SUCCESS),
-    ("📉 Cancel Plan", "panel_cancel", ButtonStyle.DANGER),
-    ("👤 User Info", "panel_info", ButtonStyle.PRIMARY),
-    ("📡 Active Bots", "panel_active", ButtonStyle.PRIMARY),
-    ("💰 Update Pricing", "panel_pricing", ButtonStyle.SUCCESS),
-    ("🔄 Reset Plans", "panel_reset_plans", ButtonStyle.DANGER),
-]
-
-def build_sudo_panel():
+def build_sudo_panel(is_owner, can_ban, can_pay):
     buttons = []
-    row = []
-    for label, data, style in SUDO_PANEL_BUTTONS:
-        row.append(InlineKeyboardButton(label, callback_data=data, style=style))
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
+    
+    if is_owner:
+        # Owner sees EVERYTHING
+        buttons.extend([
+            [InlineKeyboardButton("🚫 Ban User", callback_data="panel_ban", style=ButtonStyle.DANGER),
+             InlineKeyboardButton("✅ Unban User", callback_data="panel_unban", style=ButtonStyle.SUCCESS)],
+            [InlineKeyboardButton("👑 Add Sudo", callback_data="panel_addsudo", style=ButtonStyle.SUCCESS),
+             InlineKeyboardButton("❌ Remove Sudo", callback_data="panel_rmsudo", style=ButtonStyle.DANGER)],
+            [InlineKeyboardButton("📢 Broadcast", callback_data="panel_broadcast", style=ButtonStyle.PRIMARY),
+             InlineKeyboardButton("🛠️ Maintenance", callback_data="panel_maint", style=ButtonStyle.DANGER)],
+            [InlineKeyboardButton("📊 Stats", callback_data="panel_stats", style=ButtonStyle.SUCCESS),
+             InlineKeyboardButton("📋 Sudolist", callback_data="panel_sudolist", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("💳 Approve Plan", callback_data="panel_approve", style=ButtonStyle.SUCCESS),
+             InlineKeyboardButton("📉 Cancel Plan", callback_data="panel_cancel", style=ButtonStyle.DANGER)],
+            [InlineKeyboardButton("👤 User Info", callback_data="panel_info", style=ButtonStyle.PRIMARY),
+             InlineKeyboardButton("📡 Active Bots", callback_data="panel_active", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("💰 Update Pricing", callback_data="panel_pricing", style=ButtonStyle.SUCCESS),
+             InlineKeyboardButton("🔄 Reset Plans", callback_data="panel_reset_plans", style=ButtonStyle.DANGER)],
+        ])
+    else:
+        # Sudo Users see ONLY what they have access to
+        if can_ban:
+            buttons.append([
+                InlineKeyboardButton("🚫 Ban User", callback_data="panel_ban", style=ButtonStyle.DANGER),
+                InlineKeyboardButton("✅ Unban User", callback_data="panel_unban", style=ButtonStyle.SUCCESS)
+            ])
+            buttons.append([InlineKeyboardButton("📡 Active Bots", callback_data="panel_active", style=ButtonStyle.PRIMARY)])
+            
+        if can_pay:
+            buttons.append([
+                InlineKeyboardButton("💳 Approve Plan", callback_data="panel_approve", style=ButtonStyle.SUCCESS),
+                InlineKeyboardButton("📉 Cancel Plan", callback_data="panel_cancel", style=ButtonStyle.DANGER)
+            ])
+            buttons.append([InlineKeyboardButton("💰 Update Pricing", callback_data="panel_pricing", style=ButtonStyle.SUCCESS)])
+            
+        # Common
+        buttons.append([
+            InlineKeyboardButton("📊 Stats", callback_data="panel_stats", style=ButtonStyle.SUCCESS),
+            InlineKeyboardButton("👤 User Info", callback_data="panel_info", style=ButtonStyle.PRIMARY)
+        ])
+
     buttons.append([InlineKeyboardButton("❌ Close Panel", callback_data="panel_close", style=ButtonStyle.DANGER)])
     return InlineKeyboardMarkup(buttons)
 
+# 1. Command handler
 @bot.on_message(filters.command("admin") & filters.private)
 async def sudo_panel_command(client, message):
     user_id = message.from_user.id
-    if user_id != ADMIN_ID and not await is_staff(user_id):
-        return await message.reply("🚫 This command is restricted to admins and sudo users only.")
+    
+    if user_id == ADMIN_ID:
+        is_owner, can_ban, can_pay = True, True, True
+    else:
+        info = await get_sudo_info(user_id)
+        if not info:
+            return await message.reply("🚫 This command is restricted to admins and sudo users only.")
+        is_owner = False
+        can_ban = info[0] == 1
+        can_pay = info[1] == 1
     
     await message.reply(
         "🛡️ **SUDO ADMIN PANEL**\n\n"
         "Select a command below:",
-        reply_markup=build_sudo_panel()
+        reply_markup=build_sudo_panel(is_owner, can_ban, can_pay)
     )
 
+# 2. Start Menu Button Handler
+@bot.on_callback_query(filters.regex("^admin_panel_main$"))
+async def start_menu_admin_panel(client, query):
+    user_id = query.from_user.id
+    
+    if user_id == ADMIN_ID:
+        is_owner, can_ban, can_pay = True, True, True
+    else:
+        info = await get_sudo_info(user_id)
+        if not info:
+            return await query.answer("Access denied.", show_alert=True)
+        is_owner = False
+        can_ban = info[0] == 1
+        can_pay = info[1] == 1
+    
+    await query.message.edit_text(
+        "🛡️ **SUDO ADMIN PANEL**\n\n"
+        "Select a command below:",
+        reply_markup=build_sudo_panel(is_owner, can_ban, can_pay)
+    )
+    await query.answer()
+
+# 3. Main Panel Callbacks
 @bot.on_callback_query(filters.regex(r"^panel_"))
 async def sudo_panel_callback(client, query):
     user_id = query.from_user.id
@@ -110,7 +161,6 @@ async def sudo_panel_callback(client, query):
     hints = {
         "ban": "🚫 **Ban User**\n\nSend: `/ban <user_id> <reason>`",
         "unban": "✅ **Unban User**\n\nSend: `/unban <user_id>`",
-        "addsudo": "👑 **Add Sudo**\n\nSend: `/addsudo <user_id> <can_ban 0/1> <can_pay 0/1>`",
         "rmsudo": "❌ **Remove Sudo**\n\nSend: `/rmsudo <user_id>`",
         "broadcast": "📢 **Broadcast**\n\nSend: `/broadcast <message>`",
         "maint": "🛠️ **Maintenance**\n\nSend: `/maintenance on/off <message>`",
@@ -121,7 +171,14 @@ async def sudo_panel_callback(client, query):
     
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="panel_back", style=ButtonStyle.PRIMARY)]])
     
-    if action == "stats":
+    if action == "addsudo":
+        AWAITING_SUDO_INPUT[user_id] = {"target_id": None, "can_ban": False, "can_pay": False}
+        await query.message.edit_text(
+            "👑 **ADD SUDO USER**\n\n"
+            "Please send the **User ID** of the person you want to make Sudo:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="panel_back", style=ButtonStyle.DANGER)]])
+        )
+    elif action == "stats":
         u_count = await users_db_proxy.count_documents({})
         s_count = await subs_db_proxy.count_documents({})
         await query.message.edit_text(
@@ -132,7 +189,6 @@ async def sudo_panel_callback(client, query):
             reply_markup=back_btn
         )
     elif action == "sudolist":
-        from database import list_all_sudos
         rows = await list_all_sudos()
         if not rows:
             text = "📋 No sudo users found."
@@ -150,7 +206,6 @@ async def sudo_panel_callback(client, query):
                 text += f"👤 `{uid}`\n"
         await query.message.edit_text(text, reply_markup=back_btn)
     elif action == "pricing":
-        # Show all plans as buttons to update price
         plans = await get_all_plans()
         if not plans:
             await query.message.edit_text("⚠️ No plans in database.", reply_markup=back_btn)
@@ -178,18 +233,96 @@ async def sudo_panel_callback(client, query):
             reply_markup=back_btn
         )
     elif action == "back":
-        await query.message.edit_text("🛡️ **SUDO ADMIN PANEL**\n\nSelect a command below:", reply_markup=build_sudo_panel())
+        AWAITING_SUDO_INPUT.pop(user_id, None)
+        AWAITING_PLAN_INPUT.pop(user_id, None)
+        
+        # Re-check permissions to rebuild dynamic panel
+        if user_id == ADMIN_ID:
+            is_owner, can_ban, can_pay = True, True, True
+        else:
+            info = await get_sudo_info(user_id)
+            is_owner = False
+            can_ban = info[0] == 1 if info else False
+            can_pay = info[1] == 1 if info else False
+            
+        await query.message.edit_text(
+            "🛡️ **SUDO ADMIN PANEL**\n\n"
+            "Select a command below:", 
+            reply_markup=build_sudo_panel(is_owner, can_ban, can_pay)
+        )
     else:
         hint = hints.get(action, "❓ Unknown action.")
         await query.message.edit_text(hint, reply_markup=back_btn)
     
     await query.answer()
 
+# ============================================================
+# --- SUDO TOGGLE & SAVE LOGIC ---
+# ============================================================
+
+@bot.on_callback_query(filters.regex("^sudo_toggle_ban$"))
+async def toggle_ban_power(client, query):
+    user_id = query.from_user.id
+    if user_id in AWAITING_SUDO_INPUT and AWAITING_SUDO_INPUT[user_id]["target_id"]:
+        AWAITING_SUDO_INPUT[user_id]["can_ban"] = not AWAITING_SUDO_INPUT[user_id]["can_ban"]
+        
+        ban_status = "✅ ON" if AWAITING_SUDO_INPUT[user_id]["can_ban"] else "❌ OFF"
+        pay_status = "✅ ON" if AWAITING_SUDO_INPUT[user_id]["can_pay"] else "❌ OFF"
+        
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"Ban Power: {ban_status}", callback_data="sudo_toggle_ban", style=ButtonStyle.SUCCESS if AWAITING_SUDO_INPUT[user_id]["can_ban"] else ButtonStyle.DANGER)],
+            [InlineKeyboardButton(f"Pay Power: {pay_status}", callback_data="sudo_toggle_pay", style=ButtonStyle.SUCCESS if AWAITING_SUDO_INPUT[user_id]["can_pay"] else ButtonStyle.DANGER)],
+            [InlineKeyboardButton("💾 Save Sudo", callback_data="sudo_save", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Cancel", callback_data="panel_back", style=ButtonStyle.DANGER)]
+        ])
+        await query.message.edit_reply_markup(reply_markup=buttons)
+    await query.answer()
+
+@bot.on_callback_query(filters.regex("^sudo_toggle_pay$"))
+async def toggle_pay_power(client, query):
+    user_id = query.from_user.id
+    if user_id in AWAITING_SUDO_INPUT and AWAITING_SUDO_INPUT[user_id]["target_id"]:
+        AWAITING_SUDO_INPUT[user_id]["can_pay"] = not AWAITING_SUDO_INPUT[user_id]["can_pay"]
+        
+        ban_status = "✅ ON" if AWAITING_SUDO_INPUT[user_id]["can_ban"] else "❌ OFF"
+        pay_status = "✅ ON" if AWAITING_SUDO_INPUT[user_id]["can_pay"] else "❌ OFF"
+        
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"Ban Power: {ban_status}", callback_data="sudo_toggle_ban", style=ButtonStyle.SUCCESS if AWAITING_SUDO_INPUT[user_id]["can_ban"] else ButtonStyle.DANGER)],
+            [InlineKeyboardButton(f"Pay Power: {pay_status}", callback_data="sudo_toggle_pay", style=ButtonStyle.SUCCESS if AWAITING_SUDO_INPUT[user_id]["can_pay"] else ButtonStyle.DANGER)],
+            [InlineKeyboardButton("💾 Save Sudo", callback_data="sudo_save", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Cancel", callback_data="panel_back", style=ButtonStyle.DANGER)]
+        ])
+        await query.message.edit_reply_markup(reply_markup=buttons)
+    await query.answer()
+
+@bot.on_callback_query(filters.regex("^sudo_save$"))
+async def save_sudo_user(client, query):
+    user_id = query.from_user.id
+    if user_id in AWAITING_SUDO_INPUT and AWAITING_SUDO_INPUT[user_id]["target_id"]:
+        data = AWAITING_SUDO_INPUT[user_id]
+        target_id = data["target_id"]
+        can_ban = 1 if data["can_ban"] else 0
+        can_pay = 1 if data["can_pay"] else 0
+        
+        await add_sudo(target_id, can_ban, can_pay)
+        del AWAITING_SUDO_INPUT[user_id]
+        
+        await query.message.edit_text(
+            f"✅ **Sudo Saved Successfully!**\n\n"
+            f"👤 **User ID:** `{target_id}`\n"
+            f"🚫 **Ban Power:** `{'ON' if can_ban else 'OFF'}`\n"
+            f"💳 **Pay Power:** `{'ON' if can_pay else 'OFF'}`\n\n"
+            f"This user can now access the Admin Panel.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Panel", callback_data="panel_back", style=ButtonStyle.PRIMARY)]])
+        )
+    await query.answer()
+
 # --- Pricing plan selection ---
 @bot.on_callback_query(filters.regex(r"^price_sel_(\w+)$"))
 async def price_plan_selected(client, query):
-    if query.from_user.id != ADMIN_ID and not await is_staff(query.from_user.id):
-        return await query.answer("Access denied.", show_alert=True)
+    if query.from_user.id != ADMIN_ID and not await check_power(query.from_user.id, 'pay'):
+        return await query.answer("Access denied. 'Pay' power required.", show_alert=True)
     
     plan_key = query.matches[0].group(1)
     AWAITING_PLAN_INPUT[query.from_user.id] = {"action": "price", "plan_key": plan_key}
@@ -204,44 +337,67 @@ async def price_plan_selected(client, query):
     )
     await query.answer()
 
-# --- Handle admin's price input ---
-@bot.on_message(filters.private & filters.text)
-async def handle_price_input(client, message):
+# ============================================================
+# --- SINGLE TEXT INPUT HANDLER (For Sudo ID & Pricing) ---
+# ============================================================
+
+@bot.on_message(filters.private & filters.text & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]))
+async def handle_admin_inputs(client, message):
     user_id = message.from_user.id
-    if user_id not in AWAITING_PLAN_INPUT:
-        return
     
-    state = AWAITING_PLAN_INPUT[user_id]
-    if state["action"] != "price":
-        return
-    
-    try:
-        new_price = int(message.text.strip())
-        if new_price < 1:
-            raise ValueError("Price must be positive")
-    except:
-        return await message.reply("❌ Invalid input. Please send a positive number.")
-    
-    plan_key = state["plan_key"]
-    success = await update_plan_price(plan_key, new_price)
-    
-    del AWAITING_PLAN_INPUT[user_id]
-    
-    if success:
+    # 1. Handle Sudo User ID Input
+    if user_id in AWAITING_SUDO_INPUT and AWAITING_SUDO_INPUT[user_id]["target_id"] is None:
+        if message.text.startswith('/'): return
+        try:
+            target_id = int(message.text.strip())
+        except:
+            return await message.reply("❌ Invalid ID. Please send a numeric Telegram ID.")
+        
+        AWAITING_SUDO_INPUT[user_id]["target_id"] = target_id
+        
+        ban_status = "✅ ON" if AWAITING_SUDO_INPUT[user_id]["can_ban"] else "❌ OFF"
+        pay_status = "✅ ON" if AWAITING_SUDO_INPUT[user_id]["can_pay"] else "❌ OFF"
+        
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"Ban Power: {ban_status}", callback_data="sudo_toggle_ban", style=ButtonStyle.SUCCESS if AWAITING_SUDO_INPUT[user_id]["can_ban"] else ButtonStyle.DANGER)],
+            [InlineKeyboardButton(f"Pay Power: {pay_status}", callback_data="sudo_toggle_pay", style=ButtonStyle.SUCCESS if AWAITING_SUDO_INPUT[user_id]["can_pay"] else ButtonStyle.DANGER)],
+            [InlineKeyboardButton("💾 Save Sudo", callback_data="sudo_save", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Cancel", callback_data="panel_back", style=ButtonStyle.DANGER)]
+        ])
+        
         await message.reply(
-            f"✅ **Price Updated!**\n\n"
-            f"Plan: `{plan_key}`\n"
-            f"New Price: **₹{new_price}**\n\n"
-            f"Changes are live on the plans page and QR payments.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back to Panel", callback_data="panel_pricing", style=ButtonStyle.PRIMARY)]
-            ])
+            f"👤 **Target User ID:** `{target_id}`\n\n"
+            "Toggle the powers you want to give to this user, then click Save:",
+            reply_markup=buttons
         )
-    else:
-        await message.reply("⚠️ Failed to update. Plan key not found.")
+        return
+
+    # 2. Handle Price Input
+    if user_id in AWAITING_PLAN_INPUT:
+        state = AWAITING_PLAN_INPUT[user_id]
+        if state["action"] != "price": return
+        
+        try:
+            new_price = int(message.text.strip())
+            if new_price < 1: raise ValueError
+        except:
+            return await message.reply("❌ Invalid input. Please send a positive number.")
+        
+        plan_key = state["plan_key"]
+        success = await update_plan_price(plan_key, new_price)
+        del AWAITING_PLAN_INPUT[user_id]
+        
+        if success:
+            await message.reply(
+                f"✅ **Price Updated!**\n\nPlan: `{plan_key}`\nNew Price: **₹{new_price}**",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Pricing", callback_data="panel_pricing", style=ButtonStyle.PRIMARY)]])
+            )
+        else:
+            await message.reply("⚠️ Failed to update. Plan key not found.")
+        return
 
 # ============================================================
-# --- 1. SUDO MANAGEMENT (OWNER ONLY) ---
+# --- 1. SUDO MANAGEMENT COMMANDS (Owner Only) ---
 # ============================================================
 
 @bot.on_message(filters.command("addsudo") & filters.private)
@@ -249,14 +405,11 @@ async def add_sudo_handler(client, message):
     if message.from_user.id != ADMIN_ID: return
     args = message.text.split()
     if len(args) != 4:
-        return await message.reply("❌ Usage: `/addsudo <user_id> <can_ban 0/1> <can_pay 0/1>`")
+        return await message.reply("❌ Usage: `/addsudo <user_id> <can_ban 0/1> <can_pay 0/1>`\n*(Tip: Use the Admin Panel for a better UI)*")
     try:
         uid = int(args[1])
-        can_ban = int(args[2])
-        can_pay = int(args[3])
-        from database import add_sudo
-        await add_sudo(uid, can_ban, can_pay)
-        await message.reply(f"👤 **Sudo Added:** `{uid}`\nPowers: Ban({can_ban}) | Pay({can_pay})")
+        await add_sudo(uid, int(args[2]), int(args[3]))
+        await message.reply(f"👤 **Sudo Added:** `{uid}`")
     except Exception as e:
         await message.reply(f"❌ **Error:** {e}")
 
@@ -266,15 +419,12 @@ async def rm_sudo_handler(client, message):
     args = message.text.split()
     if len(args) != 2:
         return await message.reply("❌ Usage: `/rmsudo <user_id>`")
-    uid = int(args[1])
-    from database import remove_sudo
-    await remove_sudo(uid)
-    await message.reply(f"❌ **Sudo Removed:** `{uid}`")
+    await remove_sudo(int(args[1]))
+    await message.reply(f"❌ **Sudo Removed:** `{args[1]}`")
 
 @bot.on_message(filters.command("sudolist") & filters.private)
 async def sudo_list(client, message):
     if message.from_user.id != ADMIN_ID: return
-    from database import list_all_sudos
     rows = await list_all_sudos()
     if not rows: return await message.reply("No staff found.")
     msg = "🛡️ **Empire Staff List:**\n\n"
@@ -333,7 +483,6 @@ async def toggle_test_mode(client, message):
     custom_msg = args[3] if len(args) > 3 else None
     status = (mode == "on")
     
-    from database import set_module_testing, db
     await set_module_testing(module, status)
     
     status_text = "🧪 LOCKED (Internal Testing)" if status else "🌍 PUBLIC (Live)"
@@ -496,7 +645,6 @@ async def maintenance_handler(client, message):
 
 @bot.on_message(filters.command("sudohelp") & filters.private)
 async def sudo_help(client, message):
-    from database import is_staff, get_sudo_info
     if not await is_staff(message.from_user.id): return
     
     powers = await get_sudo_info(message.from_user.id)

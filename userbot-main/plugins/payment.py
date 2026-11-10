@@ -1,12 +1,13 @@
 import asyncio
 import os
+import glob
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
 from spl_qr import SPLQR
 from bot_instance import bot 
 from core.session_manager import SessionManager
-from config import ADMIN_ID, LOG_GROUP, SUDO_USERS, UPI_ID
+from config import ADMIN_ID, LOG_GROUP, SUDO_USERS, UPI_ID, START_PIC
 
 from database import (
     add_subscription, 
@@ -50,15 +51,27 @@ async def show_payment_info(message, plan_key):
     is_ultra = "Ultra" in plan['name']
     amount = plan['price']
     
-    # 🔥 DYNAMIC QR (amount DB se aaya)
+    # 🔥 DYNAMIC QR (Auto-Detect File Name)
     qr_filename = f"qr_{user_id}_{plan_key}.png"
     try:
+        # Pehle purani .png files saaf karo (taaki nayi file easily mile)
+        for f in glob.glob("*.png"):
+            if f != START_PIC:
+                try: os.remove(f)
+                except: pass
+
         qr = SPLQR(name="Empire Userbot", upi_id=UPI_ID)
         qr.generate(amount=amount)
-        if os.path.exists("qr.png"):
-            os.rename("qr.png", qr_filename)
-        elif os.path.exists(f"{UPI_ID}.png"):
-            os.rename(f"{UPI_ID}.png", qr_filename)
+        
+        # Ab check karo kaunsi nayi file bani
+        png_files = glob.glob("*.png")
+        if png_files:
+            generated_file = png_files[0]
+            os.rename(generated_file, qr_filename)
+        else:
+            print("QR Generate Error: Library ne koi file save nahi ki.")
+            qr_filename = None
+            
     except Exception as e:
         print(f"QR Generate Error: {e}")
         qr_filename = None

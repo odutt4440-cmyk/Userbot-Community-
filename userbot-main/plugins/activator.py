@@ -13,9 +13,6 @@ from database import (
     is_module_in_testing
 )
 
-# Use the Kurigram-compatible security check from start.py
-from plugins.start import global_security_check as start_security_check
-
 # --- MODULE CATEGORY MAP ---
 CATEGORY_MAP = {
     "games": ["wordly", "wordseek", "wordchain", "octopus", "wordle_pro"],
@@ -45,23 +42,19 @@ def get_clean_name(data_str):
 # --- MAIN ACTIVATION HANDLER ---
 @bot.on_callback_query(filters.regex(r"^(activate_|mod_)"))
 async def activate_module(client, query):
-    if query.message.chat.type != "private":
-        await query.answer("⚠️ Action allowed in Private DM only.", show_alert=True)
-        return
-    
     user_id = query.from_user.id
     data = query.data
     
-    # 🛡️ 1. Subscription Check
+    # 🛡️ 1. Valid Plan Check (Active subscription ya trial hona chahiye)
     if not await is_subscribed(user_id):
-        await query.message.edit_text(
-            "⚠️ **Premium Access Required**",
+        return await query.message.edit_text(
+            "⚠️ **Premium Access Required**\n\n"
+            "You do not have an active plan or trial to use this module. Please buy a plan to continue.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 View Plans", callback_data="pay_now", style=ButtonStyle.PRIMARY)],
-                [InlineKeyboardButton("🎁 Claim Trial", callback_data="claim_trial_btn", style=ButtonStyle.SUCCESS)]
+                [InlineKeyboardButton("🎁 Claim 24h Trial", callback_data="claim_trial_btn", style=ButtonStyle.SUCCESS)]
             ])
         )
-        return
 
     # 🔍 Clean Target Name
     target_name = get_clean_name(data)
@@ -73,7 +66,7 @@ async def activate_module(client, query):
             show_alert=True
         )
 
-    # 🔥 3. LOGIC: Pack vs Single Module
+    # 🔥 3. LOGIC: PACK vs SINGLE MODULE (Empire vs Standard)
     if "_pack" in data:
         final_load_target = data.replace("mod_", "").replace("activate_", "")
     else:
@@ -89,15 +82,16 @@ async def activate_module(client, query):
 
     await query.message.edit_text(f"⏳ **Deploying {'Folder Pack' if '_pack' in final_load_target else 'Module'}...**")
     
-    # SessionManager call (Telethon-based userbot, unchanged)
+    # 🔥 SessionManager call (Yahan Standard/Empire ka logic chalega)
     result_message = await SessionManager.start_userbot(user_id, final_load_target)
 
-    # UI Response with colored buttons
+    # UI Response
     if "Online" in result_message or "Activated" in result_message:
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("🛑 Stop Session", callback_data=f"stop_{final_load_target}", style=ButtonStyle.DANGER)]
         ])
     elif "Standard Plan Limit" in result_message:
+        # Agar standard plan mein limit lagti hai (agar session_manager ne limit lagayi ho)
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("🛑 Stop Current & Start This", callback_data=f"force_start_{final_load_target}", style=ButtonStyle.DANGER)],
             [InlineKeyboardButton("💎 Upgrade to Empire", callback_data="pay_now", style=ButtonStyle.SUCCESS)]
@@ -113,7 +107,6 @@ async def activate_module(client, query):
 # --- STOP HANDLER ---
 @bot.on_callback_query(filters.regex(r"^stop_"))
 async def stop_module(client, query):
-    if query.message.chat.type != "private": return
     user_id = query.from_user.id
     module_name = get_clean_name(query.data)
     result = await SessionManager.stop_userbot(user_id)
@@ -130,7 +123,6 @@ async def stop_module(client, query):
 # --- FORCE START ---
 @bot.on_callback_query(filters.regex(r"^force_start_"))
 async def force_start(client, query):
-    if query.message.chat.type != "private": return
     user_id = query.from_user.id
     await SessionManager.stop_userbot(user_id)
     await asyncio.sleep(1.5)
@@ -166,8 +158,6 @@ async def force_start(client, query):
 # --- EMPIRE TURBO DEPLOY MENU ---
 @bot.on_callback_query(filters.regex("^activate_all$"))
 async def activate_all_handler(client, query):
-    if query.message.chat.type != "private": return
-    
     user_id = query.from_user.id
     plan = await get_user_plan_type(user_id)
     
@@ -209,3 +199,4 @@ async def owner_logs(client, message):
         os.remove("logs.txt")
     else:
         await message.reply(msg)
+        

@@ -2,13 +2,10 @@ from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
 from bot_instance import bot
-from database import global_security_check
 
 # --- 1. ENTRY POINT (/commands) ---
-
-@bot.on_message(filters.command("commands") & filters.private)
+@bot.on_message(filters.command("commands") & filters.private, group=-1)
 async def commands_handler(client, message):
-    # Use Kurigram-compatible security check from start.py
     from plugins.start import global_security_check as start_security_check
     if not await start_security_check(message): return
 
@@ -27,8 +24,31 @@ async def commands_handler(client, message):
     ])
     await message.reply(text, reply_markup=buttons)
 
-# --- 2. MANAGEMENT CATEGORY ---
+# --- 2. /help COMMAND (Quick Guide) ---
+@bot.on_message(filters.command("help") & filters.private, group=-1)
+async def help_handler(client, message):
+    from plugins.start import global_security_check as start_security_check
+    if not await start_security_check(message): return
 
+    help_text = (
+        "📖 **How to use Empire Userbot?**\n\n"
+        "**Step 1: Generate Session**\n"
+        "Go to main menu and click on 'Generate Session'. Login with your phone number to link your account securely.\n\n"
+        "**Step 2: Purchase a Plan**\n"
+        "Click on 'View Plans' to buy a Standard or Empire plan. You can also claim a 24-hour free trial.\n\n"
+        "**Step 3: Activate Modules**\n"
+        "Go to 'Extract Modules' and start your userbot. Use `/commands` here to see all userbot commands.\n\n"
+        "⚠️ **Note:** Please read the rules in our community channel before using the bot."
+    )
+    await message.reply(
+        help_text,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📜 View All Commands", callback_data="cmd_back_main", style=ButtonStyle.PRIMARY)],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="start_back", style=ButtonStyle.DANGER)]
+        ])
+    )
+
+# --- 3. MANAGEMENT CATEGORY ---
 @bot.on_callback_query(filters.regex("^cmd_manage$"))
 async def help_manage(client, query):
     text = (
@@ -62,8 +82,7 @@ async def help_manage(client, query):
     )
     await query.answer()
 
-# --- 3. FUN CATEGORY ---
-
+# --- 4. FUN CATEGORY ---
 @bot.on_callback_query(filters.regex("^cmd_fun$"))
 async def help_fun(client, query):
     text = (
@@ -95,7 +114,7 @@ async def help_fun(client, query):
         "• `.photo` — Download all profile photos of a user.\n\n"
         "🎙️ **VC STREAMER (SaaS Engine):**\n"
         "• `.vctarget [link/username/id]` — Lock a group for streaming.\n"
-        "• `.vcstream` — Reply to audio in Saved Msg to go live (queues if busy).\n"
+        "• `.vcstream` — Reply to audio in Saved Msg to go live.\n"
         "• `.vcqueue` — Show current track & queue list.\n"
         "• `.vcskip` — Skip to the next queued track.\n"
         "• `.vcstop` — Stop stream, leave VC & clear cache.\n"
@@ -114,8 +133,7 @@ async def help_fun(client, query):
     )
     await query.answer()
 
-# --- 4. GAMES CATEGORY ---
-
+# --- 5. GAMES CATEGORY ---
 @bot.on_callback_query(filters.regex("^cmd_games$"))
 async def help_games(client, query):
     text = (
@@ -158,8 +176,7 @@ async def help_games(client, query):
     )
     await query.answer()
 
-# --- 5. NAVIGATION HELPERS ---
-
+# --- 6. NAVIGATION HELPERS ---
 @bot.on_callback_query(filters.regex("^cmd_back_main$"))
 async def help_back(client, query):
     text = (
@@ -176,6 +193,3 @@ async def help_back(client, query):
     ])
     await query.message.edit_text(text, reply_markup=buttons)
     await query.answer()
-
-# NOTE: /help handler has been REMOVED from this file.
-# It already exists in plugins/start.py, so keeping it here caused duplicate replies.

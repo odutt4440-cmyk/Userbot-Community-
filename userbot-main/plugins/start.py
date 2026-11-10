@@ -6,8 +6,19 @@ from pyrogram.enums import ButtonStyle
 from pyrogram.errors import UserNotParticipant
 from bot_instance import bot 
 from config import START_PIC, ADMIN_ID, LOG_GROUP, CHANNEL_LINK, MUST_JOIN
-from database import claim_trial, has_claimed_trial, get_setting, set_setting, get_user_plan_type, is_banned, get_ban_info, get_maintenance
+from database import (
+    claim_trial, 
+    has_claimed_trial, 
+    get_setting, 
+    set_setting, 
+    get_user_plan_type, 
+    is_banned, 
+    get_ban_info, 
+    get_maintenance,
+    is_staff
+)
 
+# Asli Panda (Simple ASCII Art)
 BEAR_ASCII = """
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⣰⣿⣿⣿⣿⣦⣀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -20,7 +31,7 @@ BEAR_ASCII = """
 ⠀⠀⠻⣿⣿⣿⣿⣿⣿⣷⣦⣄⣀⠀⠀⠀⠀⠑⠀⣠⠞⠁⠀⠀⠀
 ⠀⠀⠀⢸⡏⠉⠛⠛⠛⠿⠿⣿⣿⣿⣿⣿⣿⣿⣿⡄⠀⠀⠀⠀⠀
 ⠀⠀⠀⠸⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠛⢿⣿⣿⣿⣿⡄⠀⠀⠀⠀
-⠀⠀⠀⢷      𝐄𝐌𝐏𝐈𝐑𝐄 𝐔𝐒𝐄𝐑𝐁𝐎𝐓     ⠈⢻⣿⣿⣿⣿⡀⠀⠀⠀
+⠀⠀⠀⢷      EMPIRE USERBOT     ⠈⢻⣿⣿⣿⣿⡀⠀⠀⠀
 ⠀⠀⠀⢸⣆⠀⠀⠀⠀⠀      ⠀⠀⣿⣿⣿⣿⡇⠀⠀⠀
 ⠀⠀⠀⢸⣿⣦⣀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣼⡟⠻⠿⠟⡀⠀⠀⠀
 ⠀⠀ ⠀⣿⣿⣿⣿⣶⠶⠤⠤⢤⣶⣾⣿⣿⡇⠀
@@ -61,7 +72,6 @@ async def global_security_check(message):
 
 # --- REAL FORCE JOIN CHECK ---
 async def check_user_joined(user_id):
-    """Asli API check. UserNotParticipant raise hoga agar join nahi kiya."""
     if user_id == ADMIN_ID or not MUST_JOIN:
         return True
     
@@ -72,44 +82,38 @@ async def check_user_joined(user_id):
         return False
     except Exception as e:
         print(f"Force-join check error: {e}")
-        return True  # fail-open
+        return True
 
-# --- 1. MAIN MENU LOGIC (Native Kurigram Colored Buttons) ---
+# --- 1. MAIN MENU LOGIC ---
 async def send_start_menu(message, edit=False):
+    user_id = message.from_user.id
+    
+    # Normal English Text
     welcome_text = (
-        "ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴜsᴇʀ ᴄᴏᴍᴍᴜɴɪᴛʏ!\n"
+        "**WELCOME TO USER COMMUNITY!**\n"
         "──────────────────\n"
-        "ᴛʀᴜsᴛᴇᴅ ɢᴜᴀʀᴅ ᴇɴɢɪɴᴇ ʟᴏᴀᴅs ʏᴏᴜʀ ᴇɴᴛɪʀᴇ ʙᴏᴛ ғʀᴏᴍ ᴀ sɪɴɢʟᴇ sᴇssɪᴏɴ sᴛʀɪɴɢ. "
-        "ᴇxᴘᴇʀɪᴇɴᴄᴇ ʜɪɢʜ-sᴘᴇᴇᴅ ɢᴀᴍᴇs, ʟᴇx-ғʀᴇᴇ ɪɴᴛᴇʀᴀᴄᴛɪᴏɴ ᴛᴏᴏʟs, ᴀɴᴅ ᴀᴅᴠᴀɴᴄᴇᴅ ᴍᴏᴅᴜʟᴇs ʀɪɢʜᴛ ᴀᴛ ʏᴏᴜʀ ғɪɴɢᴇʀᴛɪᴘs. ⚡🔥"
+        "Trusted Guard Engine loads your entire bot from a single session string. "
+        "Experience high-speed games, lex-free interaction tools, and advanced modules right at your fingertips. ⚡🔥"
     )
     
-    # Native Kurigram ButtonStyle — koi richgram nahi
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "ᴇxᴛʀᴀᴄᴛ ᴍᴏᴅᴜʟᴇs", 
-            callback_data="modules_main",
-            style=ButtonStyle.PRIMARY
-        )],
-        [InlineKeyboardButton(
-            "ᴄʟᴀɪᴍ 𝟽-ᴅᴀʏ ᴛʀɪᴀʟ", 
-            callback_data="claim_trial_btn",
-            style=ButtonStyle.SUCCESS
-        )],
-        [InlineKeyboardButton(
-            "sᴜᴘᴘᴏʀᴛ", 
-            callback_data="support_main",
-            style=ButtonStyle.PRIMARY
-        )],
+    button_list = []
+    if user_id == ADMIN_ID or await is_staff(user_id):
+        button_list.append([
+            InlineKeyboardButton("🛡️ Admin Panel", callback_data="admin_panel_main", style=ButtonStyle.DANGER)
+        ])
+        
+    button_list.extend([
+        [InlineKeyboardButton("Extract Modules", callback_data="modules_main", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("Claim 24-Hour Trial", callback_data="claim_trial_btn", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("Support", callback_data="support_main", style=ButtonStyle.PRIMARY)],
         [
-            InlineKeyboardButton("ʀᴜʟᴇs", callback_data="rules", style=ButtonStyle.DANGER),
-            InlineKeyboardButton("ᴄʜᴀɴɴᴇʟ", url=CHANNEL_LINK)
+            InlineKeyboardButton("Rules", callback_data="rules", style=ButtonStyle.DANGER),
+            InlineKeyboardButton("Channel", url=CHANNEL_LINK)
         ],
-        [InlineKeyboardButton(
-            "ɢᴇɴᴇʀᴀᴛᴇ sᴇssɪᴏɴ", 
-            callback_data="gen_string_internal",
-            style=ButtonStyle.SUCCESS
-        )]
+        [InlineKeyboardButton("Generate Session", callback_data="gen_string_internal", style=ButtonStyle.SUCCESS)]
     ])
+    
+    buttons = InlineKeyboardMarkup(button_list)
 
     try:
         cached_id = await get_setting("START_PIC_ID")
@@ -119,7 +123,6 @@ async def send_start_menu(message, edit=False):
         if edit:
             await message.edit_text(welcome_text, reply_markup=buttons)
         else:
-            # Photo ke saath hi buttons — ek hi message
             sent = await bot.send_photo(
                 message.chat.id,
                 START_PIC,
@@ -138,7 +141,6 @@ async def start_handler(client, message):
     if not await global_security_check(message): return
     
     user_id = message.from_user.id
-    
     is_joined = await check_user_joined(user_id)
     
     if not is_joined:
@@ -168,15 +170,7 @@ async def start_handler(client, message):
     
     await send_start_menu(message)
 
-@bot.on_message(filters.command("help") & filters.private)
-async def help_handler(client, message):
-    help_text = "📖 **Help Guide**\n\nUse buttons below to explore and activate premium modules."
-    await message.reply(
-        help_text,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⚙️ Open Modules", callback_data="modules_main", style=ButtonStyle.PRIMARY)]
-        ])
-    )
+# NOTE: /help handler removed from here. It is in help.py now.
 
 @bot.on_message(filters.command("modules") & filters.private)
 async def modules_cmd(client, message):
@@ -186,17 +180,13 @@ async def modules_cmd(client, message):
 # --- 3. MODULES MAIN MENU ---
 async def modules_main_logic(message, edit=False):
     text = (
-        "📂 **ᴍᴏᴅᴜʟᴇ ᴄᴇɴᴛᴇʀ**\n\n"
+        "📂 **MODULE CENTER**\n\n"
         "Deploy your userbot now. Standard users can load single modules, "
         "while Empire users can deploy **Whole Folder Packs** at once!"
     )
     
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            "🚀 ᴇᴍᴘɪʀᴇ ᴛᴜʀʙᴏ ᴅᴇᴘʟᴏʏ (ғᴏʟᴅᴇʀ ᴍᴏᴅᴇ)", 
-            callback_data="empire_packs",
-            style=ButtonStyle.PRIMARY
-        )],
+        [InlineKeyboardButton("🚀 EMPIRE TURBO DEPLOY (FOLDER MODE)", callback_data="empire_packs", style=ButtonStyle.PRIMARY)],
         [
             InlineKeyboardButton("🛡️ Management", callback_data="management_ub", style=ButtonStyle.SUCCESS),
             InlineKeyboardButton("🥳 Fun Tools", callback_data="fun_ub", style=ButtonStyle.SUCCESS)
@@ -210,7 +200,161 @@ async def modules_main_logic(message, edit=False):
     else:
         await message.reply(text, reply_markup=buttons)
 
-# --- 4. CALLBACK HANDLERS ---
+# --- 4. SUBMENU HANDLERS ---
+
+# --- MANAGEMENT SUBMENU ---
+@bot.on_callback_query(filters.regex("^management_ub$"))
+async def management_menu(client, query):
+    text = (
+        "🛡️ **Userbot Management Modules**\n\n"
+        "**Group Admin Tools:**\n"
+        "• `.ban` - Reply to a user to ban them.\n"
+        "• `.mute` - Reply to a user to mute them.\n"
+        "• `.warn` - Give a warning (3 warns = Auto Ban).\n"
+        "• `.banall` - Clean a group (Bans all non-admins).\n\n"
+        "**General Info Tools:**\n"
+        "• `.id` - Get Chat/User ID.\n"
+        "• `.info` - Reply to see full user details.\n\n"
+        "**📢 Tagging Tools:**\n"
+        "• `.tagall <msg>` - Mention everyone in the group.\n"
+        "• `.stopall` - Stop the active tag process.\n"
+        "• `.tagdelay <sec>` - Set delay (Default 3s).\n\n"
+        "**🕵️ Stealth Monitor:**\n"
+        "• `.snatcher on/off` — Auto-save view-once media.\n"
+        "• `.antidelete on/off` — Log deleted messages in Saved Msg.\n\n"
+        "✅ **JOIN APPROVER:**\n"
+        "• `.approveall` — Fast batch approval (200 users/batch).\n"
+        "• `.approveallx` — Continuous auto-mode.\n"
+        "• `.autoapprove on/off` — Real-time auto-accept.\n"
+        "• `.approve [ID]` — Approve a specific user by their ID."
+    )
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👮 Admin Tools", callback_data="mod_admin", style=ButtonStyle.DANGER)],
+        [InlineKeyboardButton("📢 Tagger (TagAll)", callback_data="mod_tagger", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔍 Info Tools", callback_data="mod_info", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🕵️ Stealth", callback_data="mod_stealth", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("✅ Join Approver", callback_data="mod_approver", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🔙 Back", callback_data="modules_main", style=ButtonStyle.DANGER)]
+    ])
+    await query.message.edit_text(text, reply_markup=buttons)
+    await query.answer()
+
+# --- FUN SUBMENU ---
+@bot.on_callback_query(filters.regex("^fun_ub$"))
+async def fun_menu(client, query):
+    text = (
+        "🥳 **USERBOT FUN SUITE**\n\n"
+        "👤 **IDENTITY & AFK:**\n"
+        "• `.clone` — Copy a profile. | `.revert` — Restore.\n"
+        "• `.afk [msg]` — Set auto-reply for DMs/Mentions.\n\n"
+        "🖼️ **STICKERS & MEMIFY:**\n"
+        "• `.kang` — Add any sticker/photo to your pack.\n"
+        "• `.mm [text]` — Create memes from stickers.\n\n"
+        "🎭 **AUTO-REACTION:**\n"
+        "• `.autoreact [emoji]` — Target user (Reply) or GC.\n"
+        "• `.stopreact` — Stop auto-reactions in chat.\n\n"
+        "⚔️ **RAID SUITE:**\n"
+        "• `.spam [count] [text]` — High-speed message spam.\n"
+        "• `.raid [count] [target]` — Insult raid on a user.\n"
+        "• `.replyraid` (Reply) — Auto-insult reply engine.\n"
+        "• `.stop` — Kill raids. | `.clear` — Delete 100 msgs.\n\n"
+        "🎙️ **VC STREAMER:**\n"
+        "• `.vctarget` — Lock a group for streaming.\n"
+        "• `.vcstream` — Reply to audio to go live.\n"
+        "• `.vcstop` — Stop stream, leave VC.\n\n"
+        "🤖 **AUTO-GREETING:**\n"
+        "• `.agon` — Enable periodic messaging.\n"
+        "• `.agoff` — Disable the promoter."
+    )
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👤 Identity Clone", callback_data="mod_clone", style=ButtonStyle.PRIMARY),
+            InlineKeyboardButton("💤 AFK Reply", callback_data="mod_afk", style=ButtonStyle.PRIMARY)
+        ],
+        [
+            InlineKeyboardButton("🖼️ Stickers & Meme", callback_data="mod_stickers", style=ButtonStyle.SUCCESS),
+            InlineKeyboardButton("🎭 Auto-React", callback_data="mod_reaction", style=ButtonStyle.SUCCESS)
+        ],
+        [
+            InlineKeyboardButton("⚔️ Raid Suite", callback_data="mod_raid", style=ButtonStyle.DANGER),
+            InlineKeyboardButton("✨ Extra Fun", callback_data="mod_extra_fun", style=ButtonStyle.PRIMARY)
+        ],
+        [InlineKeyboardButton("🤖 Auto-Greeting", callback_data="mod_auto_greet", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🎙️ VC Streamer", callback_data="mod_vc_stream", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Back", callback_data="modules_main", style=ButtonStyle.DANGER)]
+    ])
+    await query.message.edit_text(text, reply_markup=buttons)
+    await query.answer()
+
+# --- GAMES SUBMENU ---
+@bot.on_callback_query(filters.regex("^games_ub$"))
+async def games_menu(client, query):
+    text = (
+        "🎮 **Userbot Game Modules**\n\n"
+        "Deploy high-speed solvers. Use these commands in saved message once active:\n\n"
+        "🧩 **WordSeek Solver:**\n"
+        "• `.ws on` | `.ws off` — Toggle Solver\n"
+        "• `.ws loop on` | `.ws loop off` — Auto Restart\n"
+        "• `.ws delay 0.5 1.5` — Set Min/Max speed\n\n"
+        "📝 **Wordly Master:**\n"
+        "• `.won` | `.woff` — Toggle Automation\n"
+        "• `.wloop on` | `.wloop off` — Auto New Game\n"
+        "• `.wdelay 0.5` — Set Typing Delay\n"
+        "• `.wstatus` — Check Round Stats\n\n"
+        "🐙 **Octopus Engine:**\n"
+        "• `.octo on` / `.octo off` — Toggle\n"
+        "• `.octo delay 2.6 3.2` — Adjust Timing\n\n"
+        "⛓️ **WordChain Pro:**\n"
+        "• `on1`, `on2`... — Join specific game ID\n"
+        "• `ban y` / `unban y` — Ban/unban letter endings\n"
+        "• `spam random` / `spam longest` — Spam mode\n"
+        "• `status` — Check all active games\n\n"
+        "🧩 **Wordle Pro:**\n"
+        "• `.wd on/off` — Toggle Master Solver.\n"
+        "• `.wd loop on/off` — Auto-start rounds.\n"
+        "• `.wd delay 1.0 2.5` — Set Typing Delay.\n"
+        "👉 _Supports 3, 4, 5, 6, 7 letter modes automatically!_"
+    )
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("WordSeek", callback_data="mod_wordseek", style=ButtonStyle.PRIMARY),
+            InlineKeyboardButton("WordChain", callback_data="mod_wordchain", style=ButtonStyle.PRIMARY)
+        ],
+        [
+            InlineKeyboardButton("Octopus", callback_data="mod_octopus", style=ButtonStyle.SUCCESS),
+            InlineKeyboardButton("Wordly", callback_data="mod_wordly", style=ButtonStyle.SUCCESS)
+        ],
+        [InlineKeyboardButton("Wordle Pro", callback_data="mod_wordle_pro", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Back", callback_data="modules_main", style=ButtonStyle.DANGER)]
+    ])
+    await query.message.edit_text(text, reply_markup=buttons)
+    await query.answer()
+
+# --- EMPIRE PACKS MENU ---
+@bot.on_callback_query(filters.regex("^empire_packs$"))
+async def empire_packs_menu(client, query):
+    user_id = query.from_user.id
+    plan = await get_user_plan_type(user_id)
+    if user_id != ADMIN_ID and "empire" not in str(plan).lower():
+        return await query.answer("❌ Empire Plan Required for Folder Mode!", show_alert=True)
+    
+    text = (
+        "👑 **EMPIRE FOLDER DEPLOY**\n\n"
+        "Select a folder pack to deploy all its modules instantly:\n\n"
+        "• **Management:** Tagger + Stealth + Admin Tools\n"
+        "• **Fun Pack:** Raid + Extra Fun + Stickers + Reactions\n"
+        "• **Games Pack:** Wordly + WordSeek + WordChain + Octopus"
+    )
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛡️ Management Pack", callback_data="mod_management_pack", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🥳 Fun Suite Pack", callback_data="mod_fun_pack", style=ButtonStyle.SUCCESS)],
+        [InlineKeyboardButton("🎮 Game Master Pack", callback_data="mod_games_pack", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🔙 Back", callback_data="modules_main", style=ButtonStyle.DANGER)]
+    ])
+    await query.message.edit_text(text, reply_markup=buttons)
+    await query.answer()
+
+# --- 5. OTHER CALLBACKS ---
 @bot.on_callback_query(filters.regex("^modules_main$"))
 async def modules_callback(client, query):
     await modules_main_logic(query.message, edit=True)
@@ -224,7 +368,6 @@ async def start_back_callback(client, query):
 @bot.on_callback_query(filters.regex("^verify_join$"))
 async def verify_join_callback(client, query):
     user_id = query.from_user.id
-    
     joined = await check_user_joined(user_id)
     
     if not joined:

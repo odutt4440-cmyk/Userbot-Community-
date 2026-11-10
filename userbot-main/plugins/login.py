@@ -9,16 +9,11 @@ try:
 except:
     GEN_DATA = {}
 
-# Tracking users providing session strings
 WAITING_FOR_STR = {}
 
 # --- 1. MODULE CLICK HANDLER ---
 @bot.on_callback_query(filters.regex(r"^mod_"))
 async def login_step_1(client, query):
-    if query.message.chat.type != "private":
-        await query.answer("⚠️ Please use this bot in Private Chat (DM) for security.", show_alert=True)
-        return
-
     user_id = query.from_user.id
     module_name = query.data.replace("mod_", "")
     
@@ -62,11 +57,10 @@ async def login_step_1(client, query):
     await query.answer()
 
 # --- 2. RECEIVE STRING HANDLER ---
-@bot.on_message(filters.private & filters.text)
+@bot.on_message(filters.private & filters.text & ~filters.command(["start", "help", "commands", "plan", "admin", "modules"]))
 async def receive_string(client, message):
     user_id = message.from_user.id
     
-    # Agar user generator use kar raha hai, toh ye function kuch nahi karega
     if user_id in GEN_DATA: return
 
     if user_id in WAITING_FOR_STR:
@@ -74,19 +68,15 @@ async def receive_string(client, message):
 
         raw_text = message.text.strip()
         
-        # Agar user ne generator wala poora message copy-paste kar diya, usme se asli string nikal lo
         if "🔑 String:" in raw_text:
             string_session = raw_text.split("🔑 String:")[1].split("\n")[0].strip()
         else:
             string_session = raw_text
 
-        # Validation
         if len(string_session) < 50:
             return
         
-        # 🔥 BUG FIX: module name save karo before deleting state
         module = WAITING_FOR_STR[user_id]
-        
         await save_user_session(user_id, string_session)
         
         subscribed = await is_subscribed(user_id)
@@ -113,14 +103,12 @@ async def receive_string(client, message):
 # --- 3. RELOG LOGIC ---
 @bot.on_callback_query(filters.regex(r"^relog_"))
 async def relog(client, query):
-    if query.message.chat.type != "private": return
-    
     user_id = query.from_user.id
     module = query.data.replace("relog_", "")
     WAITING_FOR_STR[user_id] = module
     await query.message.edit_text(
         "🔄 **Update Session String**\n\n"
-        "Please send your new **Telethon String String** below.",
+        "Please send your new **Telethon String Session** below.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔙 Back", callback_data=f"mod_{module}", style=ButtonStyle.PRIMARY)]
         ])
