@@ -29,6 +29,8 @@ ai_db = None
 pack_db = None
 reaction_db = None
 plans_db = None
+pending_payment_db = None
+pending_support_db = None
 
 # --- DEFAULT PLANS (Seed on first run) ---
 DEFAULT_PLANS = [
@@ -44,7 +46,7 @@ DEFAULT_PLANS = [
 
 # --- 🔥 THE ULTIMATE ROBUST INITIALIZATION FUNCTION ---
 async def init_db():
-    global db, users_db, subs_db, state_db, banned_db, trials_db, settings_db, sudo_db, afk_db, warn_db, stealth_db, ai_db, pack_db, reaction_db, plans_db
+    global db, users_db, subs_db, state_db, banned_db, trials_db, settings_db, sudo_db, afk_db, warn_db, stealth_db, ai_db, pack_db, reaction_db, plans_db, pending_payment_db, pending_support_db
     
     try:
         log.info("Connecting to MongoDB Cloud (Robust Mode)...")
@@ -78,6 +80,8 @@ async def init_db():
         pack_db = db["sticker_packs"]
         reaction_db = db["reaction_settings"]
         plans_db = db["plans"]
+        pending_payment_db = db["pending_payments"]
+        pending_support_db = db["pending_support"]
 
         await db.command("ping")
         log.info("🚀 MongoDB Cloud Connected Successfully!")
@@ -427,6 +431,33 @@ async def set_game_state(user_id, game_name, data):
         {"$set": {"data": data, "updated_at": datetime.datetime.now()}},
         upsert=True
     )
+
+# --- 14. 🔥 PERSISTENT STATE FOR PAYMENT & SUPPORT (NEW FIX) ---
+async def set_pending_payment(user_id: int, plan_key: str):
+    if pending_payment_db is None: return
+    await pending_payment_db.update_one({"user_id": user_id}, {"$set": {"plan_key": plan_key, "created_at": datetime.datetime.now()}}, upsert=True)
+
+async def get_pending_payment(user_id: int):
+    if pending_payment_db is None: return None
+    res = await pending_payment_db.find_one({"user_id": user_id})
+    return res["plan_key"] if res else None
+
+async def clear_pending_payment(user_id: int):
+    if pending_payment_db is None: return
+    await pending_payment_db.delete_one({"user_id": user_id})
+
+async def set_pending_support(user_id: int, category: str):
+    if pending_support_db is None: return
+    await pending_support_db.update_one({"user_id": user_id}, {"$set": {"category": category, "created_at": datetime.datetime.now()}}, upsert=True)
+
+async def get_pending_support(user_id: int):
+    if pending_support_db is None: return None
+    res = await pending_support_db.find_one({"user_id": user_id})
+    return res["category"] if res else None
+
+async def clear_pending_support(user_id: int):
+    if pending_support_db is None: return
+    await pending_support_db.delete_one({"user_id": user_id})
 
 async def get_game_state(user_id, game_name):
     if state_db is None: return {}
