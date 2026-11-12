@@ -4,9 +4,14 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
 from bot_instance import bot
 from config import LOG_GROUP, ADMIN_ID
-from database import is_banned, get_ban_info, get_maintenance
-
-SUPPORT_WAITING = {}
+from database import (
+    is_banned, 
+    get_ban_info, 
+    get_maintenance,
+    set_pending_support,     # 🔥 NEW
+    get_pending_support,     # 🔥 NEW
+    clear_pending_support    # 🔥 NEW
+)
 
 async def check_support_security(message):
     user_id = message.from_user.id
@@ -62,7 +67,9 @@ async def start_support_input(client, query):
     
     sup_type_raw = query.matches[0].group(1)
     type_map = {"bug": "BUG REPORT 🐛", "feat": "FEATURE REQUEST 💡", "comp": "GENERAL COMPLAINT 📩"}
-    SUPPORT_WAITING[user_id] = type_map[sup_type_raw]
+    
+    # 🔥 MONGODB MEIN SAVE KAR RAHE HAIN
+    await set_pending_support(user_id, type_map[sup_type_raw])
     
     await query.message.edit_text(
         f"📝 **Submitting: {type_map[sup_type_raw]}**\n\n"
@@ -76,21 +83,25 @@ async def start_support_input(client, query):
 @bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]))
 async def handle_support_message(client, message):
     user_id = message.from_user.id
-    if user_id not in SUPPORT_WAITING:
+    
+    # 🔥 MONGODB SE CHECK KAR RAHE HAIN
+    category = await get_pending_support(user_id)
+    if not category:
         return
+        
     if message.text.startswith('/'): return 
     
     is_maint, maint_text = await get_maintenance()
     if is_maint and user_id != ADMIN_ID:
         await message.reply(f"🛠️ **Bot Under Maintenance**\n\n{maint_text}")
-        del SUPPORT_WAITING[user_id]
+        await clear_pending_support(user_id)
         return
     if await is_banned(user_id):
         await message.reply("🚫 **Access Denied!** You are banned from using this bot.")
-        del SUPPORT_WAITING[user_id]
+        await clear_pending_support(user_id)
         return
 
-    report_type = SUPPORT_WAITING[user_id]
+    report_type = category
     report_text = message.text
     name = message.from_user.first_name or "User"
     username = f"@{message.from_user.username}" if message.from_user.username else "N/A"
@@ -121,4 +132,5 @@ async def handle_support_message(client, message):
     except Exception as e:
         await message.reply(f"❌ **Error:** Failed to reach admins. `{e}`")
     
-    del SUPPORT_WAITING[user_id]
+    # 🔥 MONGODB SE CLEAR KAR RAHE HAIN
+    await clear_pending_support(user_id)
