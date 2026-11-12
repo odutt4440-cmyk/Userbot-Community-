@@ -13,13 +13,13 @@ from database import (
     add_subscription, 
     get_sudo_info, 
     get_sub_info,
-    get_plan
+    get_plan,
+    set_pending_payment,     # 🔥 NEW
+    get_pending_payment,     # 🔥 NEW
+    clear_pending_payment    # 🔥 NEW
 )
 
 print("[DEBUG] ✅ PAYMENT.PY LOADED - NEW CODE ACTIVE")
-
-# Track karega user ne kaunsa plan select kiya hai
-WAITING_FOR_PAYMENT = {}
 
 async def can_user_approve(user_id):
     if user_id == ADMIN_ID: return True
@@ -37,9 +37,9 @@ async def show_payment_info(message, plan_key):
         await message.reply("⚠️ This plan is currently unavailable.")
         return
 
-    # 🔥 YAHAN SAVE HO RAHA HAI PLAN
-    WAITING_FOR_PAYMENT[user_id] = plan_key
-    print(f"[DEBUG] Saved to WAITING_FOR_PAYMENT: {WAITING_FOR_PAYMENT}")
+    # 🔥 MONGODB MEIN SAVE HO RAHA HAI
+    await set_pending_payment(user_id, plan_key)
+    print(f"[DEBUG] Saved to MongoDB pending_payments: {user_id} -> {plan_key}")
     
     if LOG_GROUP:
         try:
@@ -127,17 +127,19 @@ async def show_payment_info(message, plan_key):
 async def receive_screenshot(client, message):
     user_id = message.from_user.id
     print(f"[DEBUG] 🔥 PHOTO RECEIVED from user: {user_id}")
-    print(f"[DEBUG] Current WAITING_FOR_PAYMENT: {WAITING_FOR_PAYMENT}")
     
-    # 🔥 STRICT CHECK: Agar user ne plan select nahi kiya, toh ignore karo
-    if user_id not in WAITING_FOR_PAYMENT:
-        print(f"[DEBUG] ⚠️ User {user_id} sent photo but is not in WAITING_FOR_PAYMENT. Ignoring.")
-        return # Kuch mat karo, chupchap ignore kar do
+    # 🔥 MONGODB SE CHECK KAR RAHE HAIN
+    plan_key = await get_pending_payment(user_id)
+    print(f"[DEBUG] Pending plan from MongoDB: {plan_key}")
+    
+    if not plan_key:
+        print(f"[DEBUG] ⚠️ User {user_id} sent photo but no pending plan found in DB. Ignoring.")
+        return
 
-    plan_key = WAITING_FOR_PAYMENT[user_id]
     plan = await get_plan(plan_key)
     if not plan:
         print(f"[DEBUG] ⚠️ Plan key {plan_key} not found in DB.")
+        await clear_pending_payment(user_id)
         return
 
     user_name = message.from_user.first_name or "User"
@@ -188,8 +190,8 @@ async def receive_screenshot(client, message):
             print(f"[DEBUG] ❌ Admin Log Error: {e}")
             await bot.send_message(LOG_GROUP, admin_text, reply_markup=admin_buttons)
     
-    # 🔥 PLAN SELECTION CLEAR KARO
-    del WAITING_FOR_PAYMENT[user_id]
+    # 🔥 PLAN SELECTION CLEAR KARO MONGODB SE
+    await clear_pending_payment(user_id)
 
 # --- 3. SUDO APPROVAL LOGIC ---
 @bot.on_callback_query(filters.regex(r"^appr_(\w+)_(\d+)$"))
