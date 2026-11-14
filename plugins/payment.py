@@ -125,7 +125,6 @@ async def show_payment_info(message, plan_key):
 # --- 2. RECEIVE SCREENSHOT (SIRF WAHI PLAN JO SELECT KIYA HAI) ---
 @bot.on_message(filters.private & filters.photo, group=-5)
 async def receive_screenshot(client, message):
-async def receive_screenshot(client, message):
     user_id = message.from_user.id
     print(f"[DEBUG] 🔥 PHOTO RECEIVED from user: {user_id}")
     
