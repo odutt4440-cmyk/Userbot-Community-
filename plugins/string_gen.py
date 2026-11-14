@@ -39,8 +39,7 @@ async def start_string_gen(client, query):
     await query.answer()
 
 # --- 2. INPUT HANDLER (Kurigram) ---
-# 🔥 FIX: & ~filters.photo add kiya hai taaki ye photo ko ignore kare
-@bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "help", "commands", "plan", "admin", "modules"]))
+@bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "help", "commands", "plan", "admin", "modules"]), group=-4)
 async def handle_gen_input(client, message):
     user_id = message.from_user.id
     
