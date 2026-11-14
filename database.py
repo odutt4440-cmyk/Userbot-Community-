@@ -63,7 +63,7 @@ async def init_db():
             heartbeatFrequencyMS=10000
         )
         
-        db = client["empiretest"]
+        db = client["UserbotCommunity"]
         
         # Collection Mapping
         users_db = db["users"]
