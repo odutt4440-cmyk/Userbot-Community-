@@ -14,9 +14,9 @@ from database import (
     get_sudo_info, 
     get_sub_info,
     get_plan,
-    set_pending_payment,     # 🔥 NEW
-    get_pending_payment,     # 🔥 NEW
-    clear_pending_payment    # 🔥 NEW
+    set_pending_payment,
+    get_pending_payment,
+    clear_pending_payment
 )
 
 print("[DEBUG] ✅ PAYMENT.PY LOADED - NEW CODE ACTIVE")
@@ -28,8 +28,8 @@ async def can_user_approve(user_id):
     return False
 
 # --- 1. SHOW PAYMENT INFO ---
-async def show_payment_info(message, plan_key):
-    user_id = message.from_user.id
+# 🔥 FIX: user_id ab arguments mein pass ho rahi hai
+async def show_payment_info(message, plan_key, user_id):
     print(f"[DEBUG] show_payment_info called for user: {user_id}, plan: {plan_key}")
     
     plan = await get_plan(plan_key)
@@ -37,14 +37,15 @@ async def show_payment_info(message, plan_key):
         await message.reply("⚠️ This plan is currently unavailable.")
         return
 
-    # 🔥 MONGODB MEIN SAVE HO RAHA HAI
+    # 🔥 MONGODB MEIN SAVE HO RAHA HAI (Ab Sahi ID ke saath)
     await set_pending_payment(user_id, plan_key)
     print(f"[DEBUG] Saved to MongoDB pending_payments: {user_id} -> {plan_key}")
     
     if LOG_GROUP:
         try:
-            user_name = message.from_user.first_name or "User"
-            username = f"@{message.from_user.username}" if message.from_user.username else "N/A"
+            # message.chat se user ki details aayengi (kyunki message bot ka hai, par chat user ki hai)
+            user_name = message.chat.first_name or "User"
+            username = f"@{message.chat.username}" if message.chat.username else "N/A"
             await bot.send_message(
                 LOG_GROUP, 
                 f"💸 **Payment Intent:**\n"
