@@ -122,7 +122,7 @@ async def check_and_pay(client, query):
         await query.answer("This plan is no longer available.", show_alert=True)
         return
     
-    # Trigger payment flow
+    # 🔥 FIX: Trigger payment flow with user ID
     from plugins.payment import show_payment_info
-    await show_payment_info(query.message, plan_key)
+    await show_payment_info(query.message, plan_key, query.from_user.id)
     await query.answer()
