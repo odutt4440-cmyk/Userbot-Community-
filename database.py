@@ -311,17 +311,19 @@ async def is_staff(user_id):
     res = await sudo_db.find_one({"user_id": user_id})
     return True if res else False
 
+# 🔥 UPDATED SUDO FUNCTIONS
 async def get_sudo_info(user_id):
     if sudo_db is None: return None
     res = await sudo_db.find_one({"user_id": user_id})
-    if res: return [res.get("can_ban", 0), res.get("can_pay", 0)]
+    if res: 
+        return res.get("permissions", {}) # Returns dict of permissions
     return None
 
-async def add_sudo(user_id, can_ban=0, can_pay=0):
+async def add_sudo(user_id, permissions: dict):
     if sudo_db is None: return
     await sudo_db.update_one(
         {"user_id": user_id},
-        {"$set": {"can_ban": can_ban, "can_pay": can_pay}},
+        {"$set": {"permissions": permissions}},
         upsert=True
     )
 
@@ -334,7 +336,7 @@ async def list_all_sudos():
     cursor = sudo_db.find({})
     results = []
     async for s in cursor:
-        results.append([s["user_id"], s.get("can_ban", 0), s.get("can_pay", 0)])
+        results.append([s["user_id"], s.get("permissions", {})])
     return results
 
 # --- 4. SESSION & BAN SYSTEM ---
@@ -608,6 +610,29 @@ async def get_vc_chat(user_id):
     if settings_db is None: return None
     res = await db["vc_settings"].find_one({"user_id": user_id})
     return res.get("target_chat") if res else None
+
+# --- 15. 🔥 NEW ADMIN FEATURES (ADDED AT END) ---
+async def get_active_sub(user_id):
+    if subs_db is None: return None
+    return await subs_db.find_one({"user_id": user_id, "status": "active"})
+
+async def set_sub_expiry(user_id, new_expiry):
+    if subs_db is None: return
+    await subs_db.update_one({"user_id": user_id}, {"$set": {"expiry_date": new_expiry, "status": "active"}})
+    SUBS_CACHE[user_id] = new_expiry
+
+async def reset_user_trial(user_id):
+    if trials_db is None: return
+    await trials_db.delete_one({"user_id": user_id})
+
+async def shift_user_plan(user_id, new_plan_name, new_expiry):
+    if subs_db is None: return
+    await subs_db.update_one(
+        {"user_id": user_id},
+        {"$set": {"plan": new_plan_name, "expiry_date": new_expiry, "status": "active", "last_update": datetime.datetime.now()}},
+        upsert=True
+    )
+    SUBS_CACHE[user_id] = new_expiry
 
 # --- 7. PROXY OBJECTS FOR ADMIN COMMANDS ---
 class CollectionProxy:
