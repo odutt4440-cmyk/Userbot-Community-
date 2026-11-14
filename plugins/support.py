@@ -80,7 +80,7 @@ async def start_support_input(client, query):
     )
     await query.answer()
 
-@bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]))
+@bot.on_message(filters.private & filters.text & ~filters.photo & ~filters.command(["start", "admin", "plan", "modules", "help", "commands"]), group=-2)
 async def handle_support_message(client, message):
     user_id = message.from_user.id
     
