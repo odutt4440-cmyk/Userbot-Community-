@@ -11,6 +11,7 @@ MODULE_MAP = {
     "wordchain": "modules.games.wordchain.wordchain",
     "octopus": "modules.games.octopus.octopus",
     "wordle_pro": "modules.games.wordle_pro.wordle_pro",
+    "wordladder": "modules.games.wordladder.wordladder",
     #"wordgrid": "modules.games.wordgrid.wordgrid",
     # Fun Category
     "clone": "modules.fun.clone",
