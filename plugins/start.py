@@ -344,7 +344,7 @@ async def empire_packs_menu(client, query):
         "Select a folder pack to deploy all its modules instantly:\n\n"
         "• **Management:** Tagger + Stealth + Admin Tools\n"
         "• **Fun Pack:** Raid + Extra Fun + Stickers + Reactions\n"
-        "• **Games Pack:** Wordly + WordSeek + WordChain + Octopus"
+        "• **Games Pack:** Wordly + Word Ladder + WordSeek + WordChain + Octopus"
     )
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("🛡️ Management Pack", callback_data="mod_management_pack", style=ButtonStyle.PRIMARY)],
