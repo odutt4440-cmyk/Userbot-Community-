@@ -324,6 +324,7 @@ async def games_menu(client, query):
             InlineKeyboardButton("Octopus", callback_data="mod_octopus", style=ButtonStyle.SUCCESS),
             InlineKeyboardButton("Wordly", callback_data="mod_wordly", style=ButtonStyle.SUCCESS)
         ],
+        [InlineKeyboardButton("🪜 Word Ladder", callback_data="mod_wordladder", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("Wordle Pro", callback_data="mod_wordle_pro", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🔙 Back", callback_data="modules_main", style=ButtonStyle.DANGER)]
     ])
