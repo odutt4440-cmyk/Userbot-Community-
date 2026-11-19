@@ -24,6 +24,8 @@ CHANNEL_LINK = "https://t.me/darkconsolecommunity"
 # Ensure it starts with -100 (e.g., -100123456789)
 LOG_GROUP = int(os.getenv("LOG_GROUP", "0"))
 
+GROQ_API_KEY = "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"
+
 BACKUP_CHAT = int(os.getenv("BACKUP_CHAT", "0"))
 
 UPI_ID = "duttaashish@fam"
