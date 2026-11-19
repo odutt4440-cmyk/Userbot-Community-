@@ -19,6 +19,7 @@ MODULE_MAP = {
     "stickers": "modules.fun.stickers",
     "reaction": "modules.fun.reaction",
     "extra_fun": "modules.fun.extra",
+    "imagine": "modules.fun.imagine",
     "raid": "modules.fun.raid",
     "auto_greet": "modules.fun.auto_greet",
     "vc_stream": "modules.fun.vc_stream",
