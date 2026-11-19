@@ -16,7 +16,7 @@ from database import (
 # --- MODULE CATEGORY MAP ---
 CATEGORY_MAP = {
     "games": ["wordly", "wordladder", "wordseek", "wordchain", "octopus", "wordle_pro"],
-    "fun": ["clone", "afk", "stickers", "reaction", "extra_fun", "raid", "auto_greet", "vc_stream"],
+    "fun": ["clone", "afk", "stickers", "reaction", "extra_fun", "imagine", "raid", "auto_greet", "vc_stream"],
     "management": ["tagger", "stealth", "group_tools", "info_tools", "approver"]
 }
 
