@@ -24,7 +24,9 @@ print("[DEBUG] ✅ PAYMENT.PY LOADED - NEW CODE ACTIVE")
 async def can_user_approve(user_id):
     if user_id == ADMIN_ID: return True
     info = await get_sudo_info(user_id)
-    if info and info[1] == 1: return True
+    # 🔥 FIX: Ab ye dictionary se 'approve' permission check karega
+    if info and info.get("approve", 0) == 1: 
+        return True
     return False
 
 # --- 1. SHOW PAYMENT INFO ---
