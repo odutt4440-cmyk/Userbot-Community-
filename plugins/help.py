@@ -123,7 +123,10 @@ async def help_fun(client, query):
         "• `.agon` — Enable periodic messaging.\n"
         "• `.agoff` — Disable the promoter.\n"
         "• `.agset [Msg1 | Msg2]` — Set custom messages (Use | to split).\n"
-        "• `.agtime [Min]` — Set interval (Min: 10m)."
+        "• `.agtime [Min]` — Set interval (Min: 10m).\n\n"
+        
+        "🎨 **AI IMAGE GENERATOR:**\n" 
+        "• `.imagine [prompt]` — Generate AI images using Flux/SDXL (e.g., `.imagine a cyberpunk city`)."
     )
     await query.message.edit_text(
         text,
