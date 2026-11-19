@@ -3,7 +3,7 @@ import os
 import re
 from telethon import events
 from collections import deque
-from wordly import WORDS_DB # Reuse Wordly ki dictionary
+from modules.games.wordly.wordly import WORDS_DB
 
 # 🔥 Filter words by length (3 to 7 letters)
 WORDS_BY_LEN = {i: set() for i in range(3, 8)}
