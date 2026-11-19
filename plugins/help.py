@@ -124,9 +124,12 @@ async def help_fun(client, query):
         "• `.agoff` — Disable the promoter.\n"
         "• `.agset [Msg1 | Msg2]` — Set custom messages (Use | to split).\n"
         "• `.agtime [Min]` — Set interval (Min: 10m).\n\n"
-        
-        "🎨 **AI IMAGE GENERATOR:**\n" 
-        "• `.imagine [prompt]` — Generate AI images using Flux/SDXL (e.g., `.imagine a cyberpunk city`)."
+        "🎨 **AI IMAGE GENERATOR:**\n"
+        "• `.imagine [prompt]` — Generate AI images using Flux/SDXL (e.g., `.imagine a cyberpunk city`).\n\n"
+        "🤖 **AI CHAT BOT:**\n" # 🔥 Naya Add
+        "• `.ai on` | `.ai off` — Toggle AI replies in DMs or Groups (when tagged).\n"
+        "• `.aiprompt [text]` — Set a custom persona for the AI.\n"
+        "• `.aiclear` — Clear the AI's chat history/memory."
     )
     await query.message.edit_text(
         text,
