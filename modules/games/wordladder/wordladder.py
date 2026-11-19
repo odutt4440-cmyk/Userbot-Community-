@@ -1,15 +1,37 @@
 import asyncio
 import os
 import re
+import json
 from telethon import events
 from collections import deque
-from modules.games.wordly.wordly import WORDS_DB
 
-# 🔥 Filter words by length (3 to 7 letters)
+# 🔥 Load Dictionary from wordle_pro/words JSON files
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Path check: wordladder folder se bahar nikal kar wordle_pro/words mein jana
+DICT_DIR = os.path.join(BASE_DIR, "..", "wordle_pro", "words")
+
 WORDS_BY_LEN = {i: set() for i in range(3, 8)}
-for w in WORDS_DB:
-    if len(w) in WORDS_BY_LEN:
-        WORDS_BY_LEN[len(w)].add(w)
+
+def load_local_dict(length, filename):
+    filepath = os.path.join(DICT_DIR, filename)
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                words = json.load(f)
+                WORDS_BY_LEN[length] = set(w.lower() for w in words)
+                print(f"[LADDER] ✅ Loaded {len(words)} words of length {length}")
+        except Exception as e:
+            print(f"[LADDER] ❌ Error loading {filename}: {e}")
+    else:
+        print(f"[LADDER] ❌ File not found: {filepath}")
+
+# Load all sizes (3 to 7)
+load_local_dict(3, "all-three.json")
+load_local_dict(4, "all-four.json")
+load_local_dict(5, "all-five.json")
+load_local_dict(6, "all-six.json")
+load_local_dict(7, "all-seven.json")
+
 
 def register(client):
     # State variables
@@ -41,7 +63,8 @@ def register(client):
     def find_chain(start, target, banned):
         """Uses BFS to find the shortest path (avoiding banned words)"""
         length = len(start)
-        if length not in WORDS_BY_LEN: return []
+        if length not in WORDS_BY_LEN or not WORDS_BY_LEN[length]: 
+            return []
         
         word_set = WORDS_BY_LEN[length]
         # Add start and target to set just in case they are missing
@@ -175,7 +198,7 @@ def register(client):
                 await asyncio.sleep(1)
                 await client.send_message(event.chat_id, next_word.upper())
             else:
-                try: await client.send_message("me", "❌ No alternative path found in the game bot's dictionary.")
+                try: await client.send_message("me", "❌ No alternative path found in local dictionary.")
                 except: pass
             return
 
