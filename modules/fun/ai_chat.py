@@ -10,11 +10,13 @@ def register(client):
     client.ai_history = {}  # {chat_id: [messages]}
     
     # Default Persona (Natural, smart, conversational)
-    client.ai_prompt = "You are a helpful, smart, and slightly witty human on Telegram. Reply naturally and concisely to the user."
+    client.ai_prompt = "You are a helpful, smart, and slightly witty human on Telegram. Reply naturally and concisely to the user. Keep your replies short and human-like."
     
     # Groq API settings
     API_URL = "https://api.groq.com/openai/v1/chat/completions"
-    MODEL = "llama-3.3-70b-versatile"
+    
+    # 🔥 404 FIX: Model badal diya hai (3.3 deprecated ho chuka hai)
+    MODEL = "llama-3.1-70b-versatile" 
     
     # --- CONTROL PANEL (Saved Messages) ---
     @client.on(events.NewMessage(chats='me', pattern=r'(?i)^\.ai'))
@@ -44,6 +46,9 @@ def register(client):
         if not client.ai_enabled: return
         if not GROQ_API_KEY: return
         
+        # Ignore commands or empty messages
+        if event.raw_text.startswith('.') or not event.raw_text.strip(): return
+
         # Trigger conditions: DM, Tag, or Reply to bot
         is_private = event.is_private
         is_tagged = False
@@ -59,10 +64,8 @@ def register(client):
                 if reply_msg and reply_msg.sender_id == me.id:
                     is_reply_to_me = True
                     
+        # 🔥 Agar DM nahi hai, aur tag/reply bhi nahi hai, toh ignore karo
         if not (is_private or is_tagged or is_reply_to_me):
-            return
-
-        if event.raw_text.startswith('.'):
             return
 
         chat_id = event.chat_id
@@ -70,9 +73,9 @@ def register(client):
         
         # Remove the tag from the text
         if is_tagged and me.username:
-            user_text = user_text.replace(f"@{me.username}", "").strip()
+            user_text = user_text.replace(f"@{me.username}", "").replace(f"@{me.username.lower()}", "").strip()
 
-        # Initialize history
+        # Initialize history for this chat
         if chat_id not in client.ai_history:
             client.ai_history[chat_id] = []
 
@@ -100,7 +103,9 @@ def register(client):
 
         async with client.action(chat_id, 'typing'):
             try:
-                async with aiohttp.ClientSession() as session:
+                # 🔥 Timeout add kiya taaki bot hang na ho
+                timeout = aiohttp.ClientTimeout(total=30)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.post(API_URL, json=payload, headers=headers) as resp:
                         if resp.status == 200:
                             data = await resp.json()
@@ -114,8 +119,16 @@ def register(client):
                             
                         else:
                             err = await resp.text()
-                            await event.reply(f"⚠️ **AI API Error:** `{resp.status}`")
-                            print(f"Groq API Error: {err}")
+                            print(f"[AI CHAT ERROR] Status {resp.status}: {err}")
+                            
+                            # 🔥 Agar API fail ho jaye, toh us user ke message ko history se hata do (taaki memory kharab na ho)
+                            client.ai_history[chat_id].pop()
+                            
+                            # DM mein error mat bhejo, sirf GC mein bhejo (taaki normal user confuse na ho)
+                            if not is_private:
+                                await event.reply(f"⚠️ **AI Error:** `{resp.status}` (Check logs)")
                             
             except Exception as e:
-                print(f"AI Chat Exception: {e}")
+                print(f"[AI CHAT EXCEPTION] {e}")
+                if chat_id in client.ai_history and client.ai_history[chat_id]:
+                     client.ai_history[chat_id].pop()
