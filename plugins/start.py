@@ -279,7 +279,10 @@ async def fun_menu(client, query):
             InlineKeyboardButton("⚔️ Raid Suite", callback_data="mod_raid", style=ButtonStyle.DANGER),
             InlineKeyboardButton("✨ Extra Fun", callback_data="mod_extra_fun", style=ButtonStyle.PRIMARY)
         ],
-        [InlineKeyboardButton("🎨 AI Image Gen", callback_data="mod_imagine", style=ButtonStyle.PRIMARY)], 
+        [
+            InlineKeyboardButton("🎨 AI Image Gen", callback_data="mod_imagine", style=ButtonStyle.PRIMARY),
+            InlineKeyboardButton("🤖 AI Chat Bot", callback_data="mod_ai_chat", style=ButtonStyle.SUCCESS) 
+        ], 
         [InlineKeyboardButton("🤖 Auto-Greeting", callback_data="mod_auto_greet", style=ButtonStyle.SUCCESS)],
         [InlineKeyboardButton("🎙️ VC Streamer", callback_data="mod_vc_stream", style=ButtonStyle.PRIMARY)],
         [InlineKeyboardButton("🔙 Back", callback_data="modules_main", style=ButtonStyle.DANGER)]
