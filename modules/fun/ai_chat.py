@@ -15,8 +15,8 @@ def register(client):
     # Groq API settings
     API_URL = "https://api.groq.com/openai/v1/chat/completions"
     
-    # 🔥 404 FIX: Model badal diya hai (3.3 deprecated ho chuka hai)
-    MODEL = "llama-3.1-70b-versatile" 
+    # 🔥 404 FIX: Model badal diya hai (Ye 100% active model hai)
+    MODEL = "llama-3.1-8b-instant" 
     
     # --- CONTROL PANEL (Saved Messages) ---
     @client.on(events.NewMessage(chats='me', pattern=r'(?i)^\.ai'))
@@ -39,6 +39,20 @@ def register(client):
         elif text == ".aiclear":
             client.ai_history.clear()
             await event.edit("🧹 **AI Memory Cleared!** (Chat history reset)")
+            
+        elif text == ".aistatus":
+            if not GROQ_API_KEY:
+                return await event.edit("❌ **API Key Missing!** Check `config.py`")
+            try:
+                headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+                async with aiohttp.ClientSession() as session:
+                    async with session.get("https://api.groq.com/openai/v1/models", headers=headers) as resp:
+                        if resp.status == 200:
+                            await event.edit("✅ **API Key is VALID and working!**")
+                        else:
+                            await event.edit(f"❌ **API Key Invalid!** Status: {resp.status}")
+            except Exception as e:
+                await event.edit(f"❌ **Network Error:** {e}")
 
     # --- AI MESSAGE HANDLER ---
     @client.on(events.NewMessage(incoming=True))
@@ -103,7 +117,7 @@ def register(client):
 
         async with client.action(chat_id, 'typing'):
             try:
-                # 🔥 Timeout add kiya taaki bot hang na ho
+                # Timeout add kiya taaki bot hang na ho
                 timeout = aiohttp.ClientTimeout(total=30)
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.post(API_URL, json=payload, headers=headers) as resp:
@@ -121,10 +135,10 @@ def register(client):
                             err = await resp.text()
                             print(f"[AI CHAT ERROR] Status {resp.status}: {err}")
                             
-                            # 🔥 Agar API fail ho jaye, toh us user ke message ko history se hata do (taaki memory kharab na ho)
+                            # Agar API fail ho jaye, toh us user ke message ko history se hata do
                             client.ai_history[chat_id].pop()
                             
-                            # DM mein error mat bhejo, sirf GC mein bhejo (taaki normal user confuse na ho)
+                            # DM mein error mat bhejo, sirf GC mein bhejo
                             if not is_private:
                                 await event.reply(f"⚠️ **AI Error:** `{resp.status}` (Check logs)")
                             
