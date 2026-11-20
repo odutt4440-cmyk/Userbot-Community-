@@ -1,60 +1,49 @@
 import aiohttp
 import urllib.parse
 import io
-import asyncio  # 🔥 Import kiya (sleep ke liye zaroori hai)
+import asyncio
+import random  # 🔥 Random seed ke liye
 from telethon import events
 
 def register(client):
-    
     @client.on(events.NewMessage(outgoing=True, pattern=r'(?i)^\.imagine (.*)'))
     async def imagine_handler(event):
         prompt = event.pattern_match.group(1).strip()
         if not prompt:
             return await event.edit("❌ **Usage:** `.imagine <your prompt>`\nExample: `.imagine a cyberpunk cat`")
         
-        # Process start message
         status_msg = await event.edit("🎨 **Generating image... Please wait.**")
         
-        # Encode prompt for URL
         encoded_prompt = urllib.parse.quote(prompt)
         
-        # 🔥 FIX: Fallback models aur retry logic
-        models = ["flux", "turbo"]
-        image_bytes = None
-        max_retries = 3
+        # 🔥 Random seed aur High Quality Flux model
+        seed = random.randint(1, 9999999)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true&model=flux&seed={seed}"
         
-        for model in models:
-            for attempt in range(max_retries):
-                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true&model={model}"
-                
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(url, timeout=45) as response:
-                            if response.status == 200:
-                                image_bytes = await response.read()
-                                break # Success! Loop se bahar aao
-                                
-                            elif response.status == 503:
-                                await status_msg.edit(f"⏳ **Server busy ({model}). Retrying {attempt+1}/{max_retries}...**")
-                                await asyncio.sleep(3) # 3 second wait karke wapas try karo
-                                
-                            else:
-                                await status_msg.edit(f"❌ **API Error:** Status {response.status}")
-                                return
-                                
-                except Exception as e:
-                    print(f"Image Gen Exception: {e}")
-                    await asyncio.sleep(3)
-            
-            if image_bytes:
-                break # Agar pehle model se image mil gayi, toh doosra model try mat karo
-
-        # 🔥 Image milne ke baad send karo
+        image_bytes = None
+        
+        # 5 baar retry karega
+        for attempt in range(5):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=60) as response:
+                        if response.status == 200:
+                            image_bytes = await response.read()
+                            break
+                        elif response.status == 503:
+                            await status_msg.edit(f"⏳ **Server busy. Retrying ({attempt+1}/5)...**")
+                            await asyncio.sleep(3)
+                        else:
+                            await status_msg.edit(f"❌ **API Error:** Status {response.status}")
+                            return
+            except Exception as e:
+                print(f"Image Gen Exception: {e}")
+                await asyncio.sleep(3)
+        
         if image_bytes:
             try:
                 photo = io.BytesIO(image_bytes)
                 photo.name = "image.jpg"
-                
                 await client.send_file(
                     event.chat_id,
                     photo,
@@ -65,4 +54,4 @@ def register(client):
             except Exception as e:
                 await status_msg.edit(f"❌ **Send Error:** `{str(e)}`")
         else:
-            await status_msg.edit("❌ **Failed to generate image after multiple attempts.** Please try again later.")
+            await status_msg.edit("❌ **Failed to generate after 5 attempts.** Server might be down.")
