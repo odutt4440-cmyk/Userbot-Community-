@@ -4,40 +4,73 @@ import io
 import asyncio
 import random
 from telethon import events
+from config import CF_ACCOUNT, CF_TOKEN
+
+CF_MODEL = "@cf/black-forest-labs/flux-1-schnell"
 
 def register(client):
+
+    async def cf_generate(prompt: str, seed: int):
+        """Generate image via Cloudflare Workers AI (primary, fast + HD)."""
+        url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT}/ai/run/{CF_MODEL}"
+        headers = {"Authorization": f"Bearer {CF_TOKEN}"}
+        payload = {
+            "prompt": prompt,
+            "steps": 4,
+            "width": 1024,
+            "height": 1024,
+            "seed": seed
+        }
+        timeout = aiohttp.ClientTimeout(total=90)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status == 200:
+                    return await resp.read()  # raw image bytes
+                body = await resp.text()
+                print(f"[CF IMAGE] Status {resp.status}: {body[:300]}")
+                return None
+
+    async def pollinations_generate(prompt: str, seed: int):
+        """Fallback: Pollinations legacy endpoint (1 image per IP per 45s)."""
+        encoded_prompt = urllib.parse.quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&seed={seed}"
+        timeout = aiohttp.ClientTimeout(total=90)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    return await resp.read()
+                print(f"[POLLINATIONS] Status {resp.status}")
+                return None
+
     @client.on(events.NewMessage(outgoing=True, pattern=r'(?i)^\.imagine (.*)'))
     async def imagine_handler(event):
         prompt = event.pattern_match.group(1).strip()
         if not prompt:
-            return await event.edit("❌ **Usage:** `.imagine <your prompt>`")
-        
+            return await event.edit("❌ **Usage:** `.imagine <your prompt>`\nExample: `.imagine a cyberpunk cat`")
+
         status_msg = await event.edit("🎨 **Generating image... Please wait.**")
-        
-        # 🔥 FIX: 3 second ka delay taaki rate limit (402) na aaye
-        await asyncio.sleep(3)
-        
-        encoded_prompt = urllib.parse.quote(prompt)
         seed = random.randint(1, 9999999)
-        
-        models = ["flux", "turbo"]
+
         image_bytes = None
-        
-        for model in models:
-            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true&model={model}&seed={seed}"
+
+        # 1️⃣ Try Cloudflare first (fast, HD, generous daily free quota)
+        if CF_ACCOUNT and CF_TOKEN:
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, timeout=60) as response:
-                        if response.status == 200:
-                            image_bytes = await response.read()
-                            break
-                        elif response.status == 402:
-                            await status_msg.edit("⏳ **Rate limit hit. Switching model...**")
-                            await asyncio.sleep(3)
+                image_bytes = await cf_generate(prompt, seed)
             except Exception as e:
-                print(f"Image Gen Exception: {e}")
-                await asyncio.sleep(3)
-        
+                print(f"[CF IMAGE] Exception: {e}")
+                image_bytes = None
+
+        # 2️⃣ Fallback to Pollinations if Cloudflare failed
+        if not image_bytes:
+            await status_msg.edit("☁️ **Primary service failed. Trying backup...**")
+            try:
+                image_bytes = await pollinations_generate(prompt, seed)
+            except Exception as e:
+                print(f"[POLLINATIONS] Exception: {e}")
+                image_bytes = None
+
+        # 3️⃣ Send the image
         if image_bytes:
             try:
                 photo = io.BytesIO(image_bytes)
@@ -52,4 +85,4 @@ def register(client):
             except Exception as e:
                 await status_msg.edit(f"❌ **Send Error:** `{str(e)}`")
         else:
-            await status_msg.edit("❌ **Failed to generate.** Server rate limit exceeded.")
+            await status_msg.edit("❌ **Failed to generate image.** Both services failed. Try again in a minute.")
