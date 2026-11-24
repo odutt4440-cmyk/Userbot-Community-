@@ -17,7 +17,7 @@ def load_local_dict(length, filename):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 words = json.load(f)
-                WORDS_BY_LEN[length] = set(w.lower() for w in words)
+                WORDS_BY_LEN[length] = set(str(w).lower() for w in words)
                 print(f"[LADDER] Loaded {len(words)} words of length {length}")
         except Exception as e:
             print(f"[LADDER] Error loading {filename}: {e}")
@@ -35,7 +35,7 @@ def register(client):
     client.wl_enabled = True
     client.wl_target_chat = None
     client.wl_loop = False
-    client.wl_delay = 1.5 
+    client.wl_delay = 1.5
     client.wl_last_cmd = "/new3"
 
     client.wl_game = {
@@ -54,23 +54,23 @@ def register(client):
 
     def find_chain(start, target, banned):
         length = len(start)
-        if length not in WORDS_BY_LEN or not WORDS_BY_LEN[length]: 
+        if length not in WORDS_BY_LEN or not WORDS_BY_LEN[length]:
             return []
-        
+
         word_set = WORDS_BY_LEN[length]
         word_set.add(start)
         word_set.add(target)
-        
+
         queue = deque([[start]])
         visited = set([start])
-        
+
         while queue:
             path = queue.popleft()
             current_word = path[-1]
-            
+
             if current_word == target:
                 return path
-            
+
             for neighbor in get_neighbors(current_word, word_set, banned):
                 if neighbor not in visited:
                     visited.add(neighbor)
@@ -100,9 +100,10 @@ def register(client):
     async def detect_game(event):
         if not client.wl_enabled: return
         text = event.raw_text.lower().strip()
-        
-        # 🔥 FIXED: Accepts /new3, /new4, /new5, /new6, /new7
-        if re.match(r"^/new[3-7]", text) or text.startswith("/play"):
+
+        # 🔥 FIX: Only locks on WoodleGameBot commands (/new3 ... /new7).
+        # Plain /new (Wordly's command) will NOT trigger this module.
+        if re.match(r"^/new[3-7]", text):
             client.wl_target_chat = event.chat_id
             client.wl_last_cmd = event.raw_text
             client.wl_game = {"start": "", "target": "", "current": "", "banned": set(), "path": []}
@@ -113,27 +114,34 @@ def register(client):
     async def game_handler(event):
         if not client.wl_enabled or client.wl_target_chat is None: return
         if event.chat_id != client.wl_target_chat: return
-        
-        msg = event.raw_text
+        if event.out: return  # 🔥 FIX: never process our own sent words
+
+        msg = event.raw_text or ""
         msg_up = msg.upper()
-        
+
         # 1. GAME START DETECT
         if "WORD LADDER RACE" in msg_up or "send your chain" in msg.lower():
-            match = re.search(r"([A-Z]{3,7})\s*\n(?:\s*\n)?.*?target.*?\n(?:\s*\n)?\s*([A-Z]{3,7})", msg, re.IGNORECASE | re.DOTALL)
+            # 🔥 FIX: line-anchored regex. The old regex matched "RACE" from
+            # the title as the start word. This one only matches a standalone
+            # word line, then the target line, then the target word line.
+            match = re.search(
+                r"(?im)^\s*([A-Za-z]{3,7})\s*$\n^[^\n]*target[^\n]*$\n^\s*([A-Za-z]{3,7})\s*$",
+                msg
+            )
             if match:
                 start = match.group(1).lower()
                 target = match.group(2).lower()
-                
+
                 client.wl_game["start"] = start
                 client.wl_game["target"] = target
                 client.wl_game["current"] = start
                 client.wl_game["banned"] = set()
-                
+
                 try: await client.send_message("me", f"🔍 **Start:** `{start.upper()}` | **Target:** `{target.upper()}`")
                 except: pass
 
                 chain = find_chain(start, target, client.wl_game["banned"])
-                
+
                 if chain and len(chain) > 1:
                     client.wl_game["path"] = chain
                     next_word = chain[1]
@@ -142,21 +150,23 @@ def register(client):
                 else:
                     try: await client.send_message("me", f"❌ **No path found** from `{start.upper()}` to `{target.upper()}` in local dictionary.")
                     except: pass
+            else:
+                try: await client.send_message("me", "⚠️ **Regex failed** — could not extract start/target words from the game message.")
+                except: pass
             return
 
         # 2. SUCCESS DETECT
         if "✅" in msg and "->" in msg:
             parts = msg.split("->")
             if len(parts) == 2:
-                accepted_word = parts[1].strip().lower()
-                accepted_word = re.sub(r'[^a-z]', '', accepted_word) 
-                
+                accepted_word = re.sub(r'[^a-z]', '', parts[1].strip().lower())
+
                 if accepted_word:
                     client.wl_game["current"] = accepted_word
                     if accepted_word in client.wl_game["path"]:
                         idx = client.wl_game["path"].index(accepted_word)
                         client.wl_game["path"] = client.wl_game["path"][idx:]
-                    
+
                     if len(client.wl_game["path"]) > 1:
                         next_word = client.wl_game["path"][1]
                         await asyncio.sleep(client.wl_delay)
@@ -170,12 +180,13 @@ def register(client):
                 try:
                     replied_msg = await event.get_reply_message()
                     if replied_msg and replied_msg.text:
-                        failed_word = replied_msg.text.strip().lower()
-                        client.wl_game["banned"].add(failed_word)
+                        failed_word = re.sub(r'[^a-z]', '', replied_msg.text.strip().lower())
+                        if failed_word:
+                            client.wl_game["banned"].add(failed_word)
                 except: pass
-            
+
             new_chain = find_chain(current_valid, client.wl_game["target"], client.wl_game["banned"])
-            
+
             if new_chain and len(new_chain) > 1:
                 client.wl_game["path"] = new_chain
                 next_word = new_chain[1]
