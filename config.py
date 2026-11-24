@@ -25,6 +25,8 @@ CHANNEL_LINK = "https://t.me/darkconsolecommunity"
 LOG_GROUP = int(os.getenv("LOG_GROUP", "0"))
 
 GROQ_API_KEY = "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"
+CF_ACCOUNT = "0b9de6c529c50584c2f7fdccf3c3a856" 
+CF_TOKEN = "cfut_6jyAI5LkrfpeswKCIHp4Me6YooOF0Qfm8PK7FfI79a3b5363"
 
 BACKUP_CHAT = int(os.getenv("BACKUP_CHAT", "0"))
 
