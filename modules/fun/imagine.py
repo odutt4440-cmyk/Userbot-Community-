@@ -2,7 +2,7 @@ import aiohttp
 import urllib.parse
 import io
 import asyncio
-import random  # 🔥 Random seed ke liye
+import random
 from telethon import events
 
 def register(client):
@@ -10,32 +10,30 @@ def register(client):
     async def imagine_handler(event):
         prompt = event.pattern_match.group(1).strip()
         if not prompt:
-            return await event.edit("❌ **Usage:** `.imagine <your prompt>`\nExample: `.imagine a cyberpunk cat`")
+            return await event.edit("❌ **Usage:** `.imagine <your prompt>`")
         
         status_msg = await event.edit("🎨 **Generating image... Please wait.**")
         
+        # 🔥 FIX: 3 second ka delay taaki rate limit (402) na aaye
+        await asyncio.sleep(3)
+        
         encoded_prompt = urllib.parse.quote(prompt)
-        
-        # 🔥 Random seed aur High Quality Flux model
         seed = random.randint(1, 9999999)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true&model=flux&seed={seed}"
         
+        models = ["flux", "turbo"]
         image_bytes = None
         
-        # 5 baar retry karega
-        for attempt in range(5):
+        for model in models:
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true&model={model}&seed={seed}"
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url, timeout=60) as response:
                         if response.status == 200:
                             image_bytes = await response.read()
                             break
-                        elif response.status == 503:
-                            await status_msg.edit(f"⏳ **Server busy. Retrying ({attempt+1}/5)...**")
+                        elif response.status == 402:
+                            await status_msg.edit("⏳ **Rate limit hit. Switching model...**")
                             await asyncio.sleep(3)
-                        else:
-                            await status_msg.edit(f"❌ **API Error:** Status {response.status}")
-                            return
             except Exception as e:
                 print(f"Image Gen Exception: {e}")
                 await asyncio.sleep(3)
@@ -54,4 +52,4 @@ def register(client):
             except Exception as e:
                 await status_msg.edit(f"❌ **Send Error:** `{str(e)}`")
         else:
-            await status_msg.edit("❌ **Failed to generate after 5 attempts.** Server might be down.")
+            await status_msg.edit("❌ **Failed to generate.** Server rate limit exceeded.")
