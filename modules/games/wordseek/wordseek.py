@@ -3,6 +3,7 @@ import random
 import asyncio
 import unicodedata
 import os
+import re
 from collections import Counter
 from telethon import events
 
@@ -27,19 +28,26 @@ COMMON6 = load_json("common-six.json")
 
 STARTERS = {4: "Care", 5: "Slate", 6: "Retain"}
 
-# =========================================
-# THE MODULE REGISTER
-# =========================================
+# All possible feedback emojis (gray was missing before — that was the bug)
+FEEDBACK_EMOJIS = ["🟩", "🟨", "🟥", "🟧", "🟦", "⬜", "⬛", "🟪"]
+
+# Invisible characters the bot hides inside letters
+INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\u00ad\u180e\u2062-\u2065\u200d\u200c]")
+
+def clean_text(text: str) -> str:
+    """Strip zero-width/invisible characters from bot messages."""
+    return INVISIBLE.sub("", text)
+
 def register(client):
     # --- Per-User State ---
     client.ws_enabled = True
     client.ws_chat = None
-    client.ws_delay_min = 0.05 # Default delay
-    client.ws_delay_max = 0.15 # Default delay
+    client.ws_delay_min = 0.05
+    client.ws_delay_max = 0.15
     client.ws_mode = 5
     client.ws_loop = False
-    client.ws_loop_cmd = "/new" 
-    
+    client.ws_loop_cmd = "/new"
+
     client.ws_words = ALL5.copy()
     client.ws_common = COMMON5.copy()
     client.ws_used = set()
@@ -80,7 +88,8 @@ def register(client):
         lines = text.splitlines()
         target = None
         for line in reversed(lines):
-            if any(emoji in line for emoji in ["🟩", "🟨", "🟥"]):
+            # 🔥 FIX: detect ALL feedback emojis, including gray ⬜/⬛
+            if any(emoji in line for emoji in FEEDBACK_EMOJIS):
                 target = line.strip()
                 break
         if not target: return None
@@ -88,7 +97,7 @@ def register(client):
         feedback = []
         guess = None
         for part in parts:
-            if part in ["🟩", "🟨", "🟥"]:
+            if part in FEEDBACK_EMOJIS:
                 feedback.append(part)
             else:
                 cleaned = clean_word(part)
@@ -111,7 +120,8 @@ def register(client):
                 confirmed[char] += 1
         for i, state in enumerate(feedback):
             char = guess[i]
-            if state == "🟥":
+            # 🔥 FIX: 🟥, ⬜, ⬛ all mean "absent"
+            if state in ["🟥", "⬜", "⬛"]:
                 if confirmed[char] == 0: client.ws_black.add(char)
 
     def valid_word(word):
@@ -153,7 +163,6 @@ def register(client):
         client.ws_loop = event.pattern_match.group(1).lower() == "on"
         await event.edit(f"{'♻️' if client.ws_loop else '❌'} **Auto Loop {'Enabled' if client.ws_loop else 'Disabled'}**")
 
-    # NEW: Delay command added back!
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.ws delay (\d+\.?\d*) (\d+\.?\d*)$"))
     async def set_delay(event):
         client.ws_delay_min = float(event.pattern_match.group(1))
@@ -167,30 +176,37 @@ def register(client):
     async def detect_new_game(event):
         if not client.ws_enabled: return
         text = event.raw_text.lower().strip()
-        if text.startswith("/new"):
-            client.ws_loop_cmd = text
-            client.ws_chat = event.chat_id
-            reset_state()
-            if "4" in text: load_mode(4)
-            elif "6" in text: load_mode(6)
-            else: load_mode(5)
+
+        # 🔥 Only lock on WordSeekBot commands: /new, /new4, /new6
+        m = re.match(r"^/new[46]?(@\S+)?$", text)
+        if m:
+            mentioned = (m.group(1) or "").lower()
+            if mentioned in ("", "@wordseekbot"):
+                client.ws_loop_cmd = re.match(r"^/new[46]?", text).group(0)
+                client.ws_chat = event.chat_id
+                reset_state()
+                if "4" in text: load_mode(4)
+                elif "6" in text: load_mode(6)
+                else: load_mode(5)
+                try: await client.send_message("me", f"🎯 **WordSeek Locked!**\nChat: `{event.chat_id}`")
+                except: pass
 
     @client.on(events.NewMessage)
     async def solver(event):
         if not client.ws_enabled or event.chat_id != client.ws_chat: return
         sender = await event.get_sender()
         if not sender: return
-        sender_username = getattr(sender, "username", "") or "" 
-        if sender_username.lower() != "wordseekbot": return
-        
-        text = event.raw_text
+        sender_username = (getattr(sender, "username", "") or "").lower()
+        if sender_username != "wordseekbot": return
+
+        # 🔥 FIX: strip invisible zero-width characters the bot embeds
+        text = clean_text(event.raw_text or "")
 
         # --- GAME END DETECTION (Loop Fixed) ---
         if any(x in text for x in ["Congrats!", "Game Over!"]):
             reset_state()
             if client.ws_loop and client.ws_loop_cmd:
-                # Wait before starting new game to look natural
-                await asyncio.sleep(random.uniform(2.5, 4.5)) 
+                await asyncio.sleep(random.uniform(2.5, 4.5))
                 await client.send_message(client.ws_chat, client.ws_loop_cmd)
             return
 
@@ -198,7 +214,6 @@ def register(client):
             guess = get_next_guess()
             if guess:
                 client.ws_used.add(guess.lower())
-                # Delay integrated here
                 await asyncio.sleep(random.uniform(client.ws_delay_min, client.ws_delay_max))
                 await client.send_message(event.chat_id, guess)
             return
@@ -208,12 +223,16 @@ def register(client):
         guess, feedback = res
         if guess == client.ws_last_guess: return
         client.ws_last_guess = guess
-        
+
         apply_constraints(guess, feedback)
         next_guess = get_next_guess()
         if next_guess:
             client.ws_used.add(next_guess.lower())
             async with client.action(event.chat_id, "typing"):
-                # Delay integrated here too
                 await asyncio.sleep(random.uniform(client.ws_delay_min, client.ws_delay_max))
                 await client.send_message(event.chat_id, next_guess)
+        else:
+            # 🔥 FIX: if candidate pool is empty, widen the pool instead of dying
+            fallback = [w for w in client.ws_words if w.lower() not in client.ws_used]
+            if fallback:
+                await client.send_message(event.chat_id, fallback[0].capitalize())
