@@ -119,23 +119,34 @@ def register(client):
         if not client.w_enabled: return
         text = event.raw_text.lower().strip()
 
-        # 🔥 FIX: Wordly only locks when its own bot is addressed
-        # (@WordlyBot /new). Plain /new3 (WoodleGameBot) will NOT trigger it,
-        # so Wordly and Word Ladder never hijack each other's chat.
-        if ("/new" in text or "/play" in text) and ("wordly" in text or "wordgamez" in text):
-            client.w_target_chat = event.chat_id
-            client.w_last_cmd = event.raw_text
-            client.w_game_states = {}
+        # 🔥 FIX: Only lock on WoordlyBot commands (/new, /play).
+        # The real username is "woordlybot" (double 'o') — the old check
+        # ("wordly" in text) never matched it, so @Woordlybot commands
+        # were being ignored. Bare /new and /play are allowed because
+        # they are WoordlyBot's default commands.
+        m = re.match(r"^/(new|play)(@\S+)?$", text)
+        if m:
+            mentioned = (m.group(2) or "").lower()
+            if mentioned in ("", "@woordlybot"):
+                client.w_target_chat = event.chat_id
+                client.w_last_cmd = event.raw_text
+                client.w_game_states = {}
 
-            try:
-                await client.send_message("me", f"🎯 **Wordly Locked!**\nChat ID: `{event.chat_id}`\nFast Mode: ON 🚀")
-            except: pass
+                try:
+                    await client.send_message("me", f"🎯 **Wordly Locked!**\nChat ID: `{event.chat_id}`\nFast Mode: ON 🚀")
+                except: pass
 
     @client.on(events.NewMessage)
     async def game_handler(event):
         if not client.w_enabled or client.w_target_chat is None: return
         if event.chat_id != client.w_target_chat: return
         if event.out: return
+
+        # 🔥 FIX: only react to WoordlyBot's messages, nothing else
+        sender = await event.get_sender()
+        sender_name = (getattr(sender, "username", "") or "").lower()
+        if "woordlybot" not in sender_name:
+            return
 
         msg = event.raw_text
         msg_up = msg.upper()
