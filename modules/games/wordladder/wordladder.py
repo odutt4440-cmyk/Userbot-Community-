@@ -101,29 +101,39 @@ def register(client):
         if not client.wl_enabled: return
         text = event.raw_text.lower().strip()
 
-        # 🔥 FIX: Only locks on WoodleGameBot commands (/new3 ... /new7).
-        # Plain /new (Wordly's command) will NOT trigger this module.
-        if re.match(r"^/new[3-7]", text):
-            client.wl_target_chat = event.chat_id
-            client.wl_last_cmd = event.raw_text
-            client.wl_game = {"start": "", "target": "", "current": "", "banned": set(), "path": []}
-            try: await client.send_message("me", f"🎯 **Word Ladder Locked!**\nChat: `{event.chat_id}`")
-            except: pass
+        # 🔥 FIX: Lock ONLY on WoodleGameBot's commands (/new3 ... /new7).
+        # "/new4@WordSeekBot" is REJECTED here. Bare /new3-/new7 is allowed
+        # because those commands belong to WoodleGameBot.
+        m = re.match(r"^/new[3-7](@\S+)?$", text)
+        if m:
+            mentioned = (m.group(1) or "").lower()
+            if mentioned in ("", "@woodlegamebot"):
+                client.wl_target_chat = event.chat_id
+                client.wl_last_cmd = event.raw_text
+                client.wl_game = {"start": "", "target": "", "current": "", "banned": set(), "path": []}
+                try: await client.send_message("me", f"🎯 **Word Ladder Locked!**\nChat: `{event.chat_id}`")
+                except: pass
 
     @client.on(events.NewMessage)
     async def game_handler(event):
         if not client.wl_enabled or client.wl_target_chat is None: return
         if event.chat_id != client.wl_target_chat: return
-        if event.out: return  # 🔥 FIX: never process our own sent words
+        if event.out: return  # never process our own sent words
+
+        # 🔥 FIX: only react to WoodleGameBot's messages, nothing else
+        sender = await event.get_sender()
+        sender_name = (getattr(sender, "username", "") or "").lower()
+        if "woodlegamebot" not in sender_name:
+            return
 
         msg = event.raw_text or ""
         msg_up = msg.upper()
 
         # 1. GAME START DETECT
         if "WORD LADDER RACE" in msg_up or "send your chain" in msg.lower():
-            # 🔥 FIX: line-anchored regex. The old regex matched "RACE" from
-            # the title as the start word. This one only matches a standalone
-            # word line, then the target line, then the target word line.
+            # Line-anchored regex: standalone word line, then the target
+            # line, then the target word line. The old regex matched "RACE"
+            # from the title as the start word.
             match = re.search(
                 r"(?im)^\s*([A-Za-z]{3,7})\s*$\n^[^\n]*target[^\n]*$\n^\s*([A-Za-z]{3,7})\s*$",
                 msg
