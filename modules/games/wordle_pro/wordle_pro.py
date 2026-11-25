@@ -30,21 +30,25 @@ FILE_MAP = {
 }
 
 def register(client):
-    client.wd_enabled = True
+    # 🔥 PERMANENTLY DISABLED: The Wordle Pro bot (@wordlegameprobot)
+    # has been deleted. This module has no bot to play with, and its old
+    # loose /new detection was hijacking other bots' commands
+    # (e.g. /new@WordSeekBot). It must stay fully off to avoid clashes.
+
+    client.wd_enabled = False
     client.wd_chat = None
-    client.wd_delay_min = 1.0 
-    client.wd_delay_max = 2.0 
+    client.wd_delay_min = 1.0
+    client.wd_delay_max = 2.0
     client.wd_mode = 5
     client.wd_loop = False
-    client.wd_loop_cmd = "/new" 
-    
+    client.wd_loop_cmd = "/new"
+
     client.wd_used = set()
-    client.wd_green = {}  # pos: char
-    client.wd_yellow = {} # char: {pos}
+    client.wd_green = {}
+    client.wd_yellow = {}
     client.wd_black = set()
     client.wd_last_guess = None
 
-    # --- 🛠️ HELPERS ---
     async def safe_edit(event, text):
         try: await event.edit(text)
         except: pass
@@ -57,11 +61,9 @@ def register(client):
         client.wd_last_guess = None
 
     def parse_full_board(text):
-        """History-Aware Parser: Poore board ko scan karta hai"""
         lines = text.splitlines()
         found_clues = []
         for line in lines:
-            # Regex to match: [Emojis] [WORD]
             match = re.search(r"([🟩🟨🟥⬜⬛\s]{3,})\s+([A-Z]{3,7})", line.upper())
             if match:
                 raw_emojis = match.group(1).replace(" ", "")
@@ -72,19 +74,16 @@ def register(client):
         return found_clues
 
     def apply_constraints_from_history(clues):
-        """Rules ko reset karke history se naye sire se apply karo"""
         client.wd_green = {}
         client.wd_yellow = {}
         client.wd_black = set()
         all_present_chars = set()
 
-        # Pehle green aur yellow letters ki list banao
         for word, emojis in clues:
             for i, emoji in enumerate(emojis):
                 if emoji == "🟩" or emoji == "🟨":
                     all_present_chars.add(word[i])
 
-        # Ab rules apply karo
         for word, emojis in clues:
             client.wd_used.add(word)
             for i, emoji in enumerate(emojis):
@@ -95,7 +94,6 @@ def register(client):
                     if char not in client.wd_yellow: client.wd_yellow[char] = set()
                     client.wd_yellow[char].add(i)
                 elif emoji in ["🟥", "⬜", "⬛"]:
-                    # Char blacklist sirf tab hoga jab wo word me kahin aur green/yellow na ho
                     if char not in all_present_chars:
                         client.wd_black.add(char)
 
@@ -116,30 +114,28 @@ def register(client):
         suffix = FILE_MAP.get(client.wd_mode, "five")
         common = load_json(f"common-{suffix}.json")
         all_words = load_json(f"all-{suffix}.json")
-        
-        # Merge dictionaries for maximum accuracy
         pool = list(set(common + all_words))
-        
         candidates = [w for w in pool if is_valid(w) and w.lower() not in client.wd_used]
         if not candidates: return None
-
-        # Letter frequency scoring logic
         freq = Counter("".join(candidates))
         candidates.sort(key=lambda w: sum(freq[c] for c in set(w.lower())), reverse=True)
         return candidates[0].capitalize()
 
-    # --- COMMANDS ---
+    # --- COMMANDS (kept for manual control, but locked OFF) ---
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.wd (on|off)$"))
     async def toggle_wd(event):
-        client.wd_enabled = event.pattern_match.group(1).lower() == "on"
-        await safe_edit(event, f"🧩 **Wordle Pro: {'ON' if client.wd_enabled else 'OFF'}**")
+        if event.pattern_match.group(1).lower() == "on":
+            await safe_edit(event, "🧩 **Wordle Pro: DISABLED**\nBot was deleted. Use WordSeek / Wordly / Word Ladder instead.")
+        else:
+            client.wd_enabled = False
+            client.wd_chat = None
+            await safe_edit(event, "🧩 **Wordle Pro: OFF**")
 
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.wd loop (on|off)$"))
     async def toggle_loop(event):
         client.wd_loop = event.pattern_match.group(1).lower() == "on"
         await safe_edit(event, f"♻️ **Loop Mode: {'ON' if client.wd_loop else 'OFF'}**")
 
-    
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.wd delay (\d+\.?\d*) (\d+\.?\d*)$"))
     async def set_delay(event):
         try:
@@ -149,68 +145,14 @@ def register(client):
         except:
             await safe_edit(event, "❌ **Usage:** `.wd delay 0.1 0.5` (Min Max)")
 
-    # --- AUTO LOCK & COMMAND UPDATER ---
+    # --- AUTO LOCK: PERMANENTLY DEAD ---
     @client.on(events.NewMessage(outgoing=True))
     async def detect_new(event):
-        if not client.wd_enabled: return
-        
-        raw_text = event.raw_text.strip()
-        text_lower = raw_text.lower()
-        
-        # Kisi bhi tarah ki /new command ko pakadne ke liye
-        if text_lower.startswith("/new"):
-            client.wd_chat = event.chat_id
-            # 🔥 Exact command save karo (Case sensitive jaisa tumne bheja)
-            client.wd_loop_cmd = raw_text 
-            
-            # Extract Mode (3, 4, 5, 6, 7)
-            digit = re.findall(r"\d", text_lower)
-            client.wd_mode = int(digit[0]) if digit else 5
-            
-            reset_state() # Purana data saaf
-            
-            # Notification in Saved Messages
-            await client.send_message("me", (
-                f"🎯 **Wordle Pro: Target Locked**\n"
-                f"📍 **Chat:** `{event.chat_id}`\n"
-                f"📏 **Mode:** `{client.wd_mode} Letters`\n"
-                f"🔄 **Loop Cmd:** `{client.wd_loop_cmd}`"
-            ))
+        # 🔥 Never locks anything. Bot deleted — this module is retired.
+        return
 
-    # --- GAME HANDLER ---
+    # --- GAME HANDLER: PERMANENTLY DEAD ---
     @client.on(events.NewMessage)
     async def game_handler(event):
-        if not client.wd_enabled or event.chat_id != client.wd_chat: return
-        
-        sender = await event.get_sender()
-        if not sender or (getattr(sender, 'username', '') or '').lower() != "wordlegameprobot":
-            return
-            
-        text = event.raw_text
-        
-        # --- 1. GAME END / LOOP LOGIC (Screenshot Optimized) ---
-        # "Congrats" aur "Correct Word" keywords add kiye hain
-        if any(x.lower() in text.lower() for x in ["Congrats", "Game Over", "Correct Word"]):
-            reset_state()
-            
-            if client.wd_loop:
-                # 🔥 Updated: Ab 3 second baad naya game start karega
-                await asyncio.sleep(3)
-                
-                # Loop command bhejega (e.g. /new5)
-                await client.send_message(client.wd_chat, client.wd_loop_cmd)
-            return
-
-        # 2. Solver Trigger
-        if any(emoji in text for emoji in ["🟩", "🟨", "🟥"]) or "Start guessing" in text:
-            clues = parse_full_board(text)
-            if clues:
-                apply_constraints_from_history(clues)
-            
-            next_w = get_next_guess()
-            if next_w:
-                async with client.action(event.chat_id, "typing"):
-                    await asyncio.sleep(random.uniform(client.wd_delay_min, client.wd_delay_max))
-                    await client.send_message(event.chat_id, next_w)
-            else:
-                log.info(f"DEBUG: No candidates left for mode {client.wd_mode}")
+        # 🔥 Never reacts. Bot deleted — this module is retired.
+        return
