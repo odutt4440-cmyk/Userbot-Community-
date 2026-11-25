@@ -28,14 +28,13 @@ COMMON6 = load_json("common-six.json")
 
 STARTERS = {4: "Care", 5: "Slate", 6: "Retain"}
 
-# All possible feedback emojis (gray was missing before — that was the bug)
-FEEDBACK_EMOJIS = ["🟩", "🟨", "🟥", "🟧", "🟦", "⬜", "⬛", "🟪"]
+# All possible feedback emojis
+FEEDBACK_EMOJIS = ["🟩", "🟨", "🟥", "🟧", "🟦", "⬜", "⬛", "🟪", "🟢", "🟡", "🔴", "🟠", "🔵"]
 
-# Invisible characters the bot hides inside letters
+# Invisible characters
 INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\u00ad\u180e\u2062-\u2065\u200d\u200c]")
 
 def clean_text(text: str) -> str:
-    """Strip zero-width/invisible characters from bot messages."""
     return INVISIBLE.sub("", text)
 
 def register(client):
@@ -84,44 +83,75 @@ def register(client):
                 if c.isalpha(): result += c.lower()
         return result
 
-    def parse_feedback(text):
+    # 🔥 1. Normal Text Parser (For old format)
+    def parse_feedback_text(text):
         lines = text.splitlines()
         target = None
         for line in reversed(lines):
-            # 🔥 FIX: detect ALL feedback emojis, including gray ⬜/⬛
             if any(emoji in line for emoji in FEEDBACK_EMOJIS):
                 target = line.strip()
                 break
         if not target: return None
-        parts = target.split()
+        
+        target = target.replace(" ", "")
         feedback = []
-        guess = None
-        for part in parts:
-            if part in FEEDBACK_EMOJIS:
-                feedback.append(part)
-            else:
-                cleaned = clean_word(part)
-                if cleaned: guess = cleaned
+        guess = ""
+        for char in target:
+            if char in FEEDBACK_EMOJIS:
+                feedback.append(char)
+            elif char.isalpha():
+                guess += char.lower()
+                
         if not guess or len(feedback) != len(guess): return None
         return guess, feedback
+
+    # 🔥 2. NEW Button Parser (For the new update)
+    def parse_feedback_buttons(event):
+        if not event.reply_markup: return None
+        guess = ""
+        feedback = []
+        
+        for row in event.reply_markup.rows:
+            for button in row.buttons:
+                text = getattr(button, 'text', '').strip()
+                letter = "".join([c for c in text if c.isalpha()]).lower()
+                
+                if len(letter) == 1:
+                    guess += letter
+                    data_str = str(getattr(button, 'data', '')).lower()
+                    
+                    # Check button text or callback data for color hints
+                    if 'green' in data_str or 'correct' in data_str or '🟩' in text or '🟢' in text:
+                        feedback.append('🟩')
+                    elif 'yellow' in data_str or 'present' in data_str or '🟨' in text or '🟡' in text:
+                        feedback.append('🟨')
+                    elif 'red' in data_str or 'absent' in data_str or '🟥' in text or '🔴' in text:
+                        feedback.append('🟥')
+                    else:
+                        # Agar data me color nahi mila, toh default red maan lo (ya debug karne ke liye None bhejo)
+                        # Hum assume kar rahe hain ki jo galat hoga wo red hoga
+                        feedback.append('🟥') 
+                        
+        if guess and len(feedback) == len(guess):
+            return guess, feedback
+        return None
 
     def apply_constraints(guess, feedback):
         confirmed = Counter()
         for i, state in enumerate(feedback):
             char = guess[i]
-            if state == "🟩":
+            if state in ["🟩", "🟢"]:
                 client.ws_green[i] = char
                 confirmed[char] += 1
         for i, state in enumerate(feedback):
             char = guess[i]
-            if state == "🟨":
+            if state in ["🟨", "🟡"]:
                 if char not in client.ws_yellow: client.ws_yellow[char] = set()
                 client.ws_yellow[char].add(i)
                 confirmed[char] += 1
         for i, state in enumerate(feedback):
             char = guess[i]
-            # 🔥 FIX: 🟥, ⬜, ⬛ all mean "absent"
-            if state in ["🟥", "⬜", "⬛"]:
+            if state in ["🟥", "⬜", "⬛", "🔴"]:
                 if confirmed[char] == 0: client.ws_black.add(char)
 
     def valid_word(word):
@@ -151,7 +181,7 @@ def register(client):
         return pool[0].capitalize()
 
     # =========================================
-    # COMMANDS (Saved Messages Control)
+    # COMMANDS
     # =========================================
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.ws (on|off)$"))
     async def toggle_ws(event):
@@ -177,7 +207,6 @@ def register(client):
         if not client.ws_enabled: return
         text = event.raw_text.lower().strip()
 
-        # 🔥 Only lock on WordSeekBot commands: /new, /new4, /new6
         m = re.match(r"^/new[46]?(@\S+)?$", text)
         if m:
             mentioned = (m.group(1) or "").lower()
@@ -199,10 +228,8 @@ def register(client):
         sender_username = (getattr(sender, "username", "") or "").lower()
         if sender_username != "wordseekbot": return
 
-        # 🔥 FIX: strip invisible zero-width characters the bot embeds
         text = clean_text(event.raw_text or "")
 
-        # --- GAME END DETECTION (Loop Fixed) ---
         if any(x in text for x in ["Congrats!", "Game Over!"]):
             reset_state()
             if client.ws_loop and client.ws_loop_cmd:
@@ -218,21 +245,31 @@ def register(client):
                 await client.send_message(event.chat_id, guess)
             return
 
-        res = parse_feedback(text)
-        if not res: return
+        # 🔥 TRY BOTH PARSERS (Text and Buttons)
+        res = parse_feedback_text(text)
+        if not res:
+            res = parse_feedback_buttons(event)
+            
+        if not res:
+            # DEBUG: Agar dono fail ho jayein toh saved messages mein bhejo
+            if event.reply_markup:
+                try: await client.send_message("me", f"⚠️ **Debug - Buttons Not Parsed:**\n\nText: `{text}`\nButtons: `{event.reply_markup}`")
+                except: pass
+            return
+            
         guess, feedback = res
         if guess == client.ws_last_guess: return
         client.ws_last_guess = guess
 
         apply_constraints(guess, feedback)
         next_guess = get_next_guess()
+        
         if next_guess:
             client.ws_used.add(next_guess.lower())
             async with client.action(event.chat_id, "typing"):
                 await asyncio.sleep(random.uniform(client.ws_delay_min, client.ws_delay_max))
                 await client.send_message(event.chat_id, next_guess)
         else:
-            # 🔥 FIX: if candidate pool is empty, widen the pool instead of dying
             fallback = [w for w in client.ws_words if w.lower() not in client.ws_used]
             if fallback:
                 await client.send_message(event.chat_id, fallback[0].capitalize())
