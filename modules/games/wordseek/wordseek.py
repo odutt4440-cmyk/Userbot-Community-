@@ -28,18 +28,20 @@ COMMON6 = load_json("common-six.json")
 
 STARTERS = {4: "Care", 5: "Slate", 6: "Retain"}
 
-# Old-format emojis (kept as fallback in case the bot reverts)
 FEEDBACK_EMOJIS = ["🟩", "🟨", "🟥", "🟧", "🟦", "⬜", "⬛", "🟪"]
 
-# Invisible characters the bot injects inside letters
 INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\u00ad\u180e\u2062-\u2065]")
 
 def clean_text(text: str) -> str:
     return INVISIBLE.sub("", text)
 
+def log(msg):
+    print(f"[WORDSEEK] {msg}", flush=True)
+
 def register(client):
     # --- Per-User State ---
     client.ws_enabled = True
+    client.ws_debug = False
     client.ws_chat = None
     client.ws_delay_min = 0.05
     client.ws_delay_max = 0.15
@@ -74,6 +76,7 @@ def register(client):
         else:
             client.ws_words = ALL5.copy()
             client.ws_common = COMMON5.copy()
+        log(f"mode loaded: {mode} letters")
 
     def clean_word(word):
         result = ""
@@ -84,14 +87,25 @@ def register(client):
         return result
 
     # =========================================
-    # 🔥 NEW-FORMAT PARSER (buttons with wh: data)
+    # 🔥 BUTTON PARSER (wh:<state>:<letter>)
     # =========================================
-    # The bot now renders each letter as an inline tile-button whose
-    # callback data is "wh:<state>:<letter>" where state is one of
-    # correct / present / absent. We read those buttons directly.
-    def collect_buttons(message):
+    async def collect_buttons(message):
+        """Fetch inline buttons. message.buttons is lazy — must await
+        message.get_buttons() or it can be None."""
         buttons = []
+        # 1) Force-fetch from server/DB (the important one)
         try:
+            rows = await message.get_buttons()
+            if rows:
+                for row in rows:
+                    if isinstance(row, (list, tuple)):
+                        buttons.extend(row)
+                    elif row is not None:
+                        buttons.append(row)
+        except Exception as e:
+            log(f"get_buttons failed: {e}")
+        # 2) Cached attr as backup
+        if not buttons:
             rows = getattr(message, "buttons", None)
             if rows:
                 for row in rows:
@@ -99,8 +113,7 @@ def register(client):
                         buttons.extend(row)
                     elif row is not None:
                         buttons.append(row)
-        except Exception:
-            pass
+        # 3) Raw reply_markup walk as last resort
         if not buttons:
             markup = getattr(message, "reply_markup", None)
             if markup is not None:
@@ -112,10 +125,14 @@ def register(client):
                     pass
         return buttons
 
-    def parse_button_feedback(message):
-        """Returns (guess, feedback) using the bot's tile-button data."""
-        entries = []  # (letter, state) in order
-        for btn in collect_buttons(message):
+    async def parse_button_feedback(message):
+        """Returns (guess, feedback) from the bot's tile-buttons.
+        Each button's callback data is wh:<correct|present|absent>:<LETTER>.
+        Buttons come row-by-row; each row = one guess of ws_mode letters."""
+        entries = []
+        buttons = await collect_buttons(message)
+        log(f"buttons fetched: {len(buttons)}")
+        for btn in buttons:
             data = getattr(btn, "data", None)
             if not data:
                 continue
@@ -123,6 +140,8 @@ def register(client):
                 text = data.decode("utf-8", "ignore")
             except Exception:
                 continue
+            if client.ws_debug:
+                log(f"button data: {text!r}")
             if not text.startswith("wh:"):
                 continue
             parts = text.split(":")
@@ -135,7 +154,6 @@ def register(client):
         if not entries:
             return None
 
-        # Buttons come row by row; each row = one guess of ws_mode letters.
         n = client.ws_mode
         if len(entries) < n:
             return None
@@ -144,7 +162,6 @@ def register(client):
         if len(guess) != n or not guess.isalpha():
             return None
 
-        # Map states to the emoji vocabulary the constraint engine uses
         feedback = []
         for _, state in last_row:
             if state == "correct":
@@ -176,8 +193,6 @@ def register(client):
         return None
 
     def parse_bare_word(text):
-        """No emojis anywhere: if a standalone word matches our last guess,
-        treat it as all-absent feedback."""
         for line in reversed(text.splitlines()):
             stripped = line.strip()
             if re.fullmatch(rf"[A-Za-z]{{{client.ws_mode}}}", stripped):
@@ -203,6 +218,7 @@ def register(client):
             char = guess[i]
             if state in ["🟥", "⬜", "⬛", "🟪"]:
                 if confirmed[char] == 0: client.ws_black.add(char)
+        log(f"constraints: green={dict(client.ws_green)} yellow={ {k: sorted(v) for k, v in client.ws_yellow.items()} } black={sorted(client.ws_black)}")
 
     def valid_word(word):
         word = word.lower()
@@ -233,6 +249,7 @@ def register(client):
     async def send_guess(event, guess):
         client.ws_used.add(guess.lower())
         client.ws_last_guess = guess.lower()
+        log(f"sending guess: {guess}")
         async with client.action(event.chat_id, "typing"):
             await asyncio.sleep(random.uniform(client.ws_delay_min, client.ws_delay_max))
             await client.send_message(event.chat_id, guess)
@@ -256,6 +273,11 @@ def register(client):
         client.ws_delay_max = float(event.pattern_match.group(2))
         await event.edit(f"⚡ **WordSeek Delay Set:** {client.ws_delay_min}s - {client.ws_delay_max}s")
 
+    @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.ws debug (on|off)$"))
+    async def toggle_debug(event):
+        client.ws_debug = event.pattern_match.group(1).lower() == "on"
+        await event.edit(f"🐞 **WordSeek Debug {'Enabled' if client.ws_debug else 'Disabled'}**")
+
     # =========================================
     # MAIN ENGINE
     # =========================================
@@ -275,6 +297,7 @@ def register(client):
                 if "4" in text: load_mode(4)
                 elif "6" in text: load_mode(6)
                 else: load_mode(5)
+                log(f"locked on chat {event.chat_id} via {text}")
                 try: await client.send_message("me", f"🎯 **WordSeek Locked!**\nChat: `{event.chat_id}`")
                 except: pass
 
@@ -288,9 +311,11 @@ def register(client):
 
         message = event.message
         text = clean_text(event.raw_text or "")
+        log(f"bot message received: {text[:80]!r}")
 
         # --- GAME END DETECTION ---
         if "You guessed it correctly" in text or "Congrats!" in text or "Game Over!" in text:
+            log("game ended — resetting")
             reset_state()
             if client.ws_loop and client.ws_loop_cmd:
                 await asyncio.sleep(random.uniform(2.5, 4.5))
@@ -298,16 +323,16 @@ def register(client):
             return
 
         # --- GAME START ---
-        if "Game started!" in text:
+        if "Game started!" in text or "game started" in text.lower():
             guess = get_next_guess()
+            log("game start detected")
             if guess:
                 await send_guess(event, guess)
             return
 
         # --- INVALID WORD / ALREADY GUESSED ---
         if "is not a valid" in text.lower() or "already guessed your word" in text.lower():
-            # Our last word was rejected by the bot's dictionary. Drop it and
-            # immediately try the next candidate.
+            log("invalid/dupe word — advancing")
             if client.ws_last_guess:
                 client.ws_used.add(client.ws_last_guess)
             client.ws_last_guess = None
@@ -316,16 +341,19 @@ def register(client):
                 await send_guess(event, guess)
             return
 
-        # --- FEEDBACK PARSING (new button format first, then fallbacks) ---
-        res = parse_button_feedback(message)
+        # --- FEEDBACK PARSING (buttons first, then fallbacks) ---
+        res = await parse_button_feedback(message)
         if not res:
             res = parse_emoji_feedback(text)
         if not res:
             res = parse_bare_word(text)
         if not res:
+            if client.ws_debug:
+                log(f"could not parse feedback. raw={event.raw_text!r} markup={type(getattr(message, 'reply_markup', None)).__name__}")
             return
 
         guess, feedback = res
+        log(f"feedback parsed: guess={guess} feedback={''.join(feedback)}")
         client.ws_last_guess = guess
 
         apply_constraints(guess, feedback)
@@ -333,7 +361,7 @@ def register(client):
         if next_guess:
             await send_guess(event, next_guess)
         else:
-            # Pool empty — widen to all words as a safety net
             fallback = [w for w in client.ws_words if w.lower() not in client.ws_used]
+            log(f"pool empty — fallback: {len(fallback)} words left")
             if fallback:
                 await send_guess(event, fallback[0].capitalize())
