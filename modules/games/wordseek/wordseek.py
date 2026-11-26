@@ -4,6 +4,7 @@ import asyncio
 import unicodedata
 import os
 import re
+import base64
 from collections import Counter
 from telethon import events
 
@@ -31,6 +32,9 @@ STARTERS = {4: "Care", 5: "Slate", 6: "Retain"}
 FEEDBACK_EMOJIS = ["🟩", "🟨", "🟥", "🟧", "🟦", "⬜", "⬛", "🟪"]
 
 INVISIBLE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\u00ad\u180e\u2062-\u2065]")
+
+# Matches the bot's rich-message buttons: data="wh:<state>:<LETTER>"
+RICH_BTN = re.compile(r"data(?:-base64)?=(?:\"|&quot;|')wh:(correct|present|absent):([A-Za-z])(?:\"|&quot;|')")
 
 def clean_text(text: str) -> str:
     return INVISIBLE.sub("", text)
@@ -87,13 +91,33 @@ def register(client):
         return result
 
     # =========================================
-    # 🔥 BUTTON PARSER (wh:<state>:<letter>)
+    # 🔥 PARSER 1: RICH MESSAGE (tg-button via html_text)
+    # =========================================
+    def parse_rich_feedback(message):
+        """WordSeek sends a Rich Message whose board tiles are
+        <tg-button type='callback_data' data='wh:<state>:<L>'>.
+        Telethon-MCUB renders rich content into html_text."""
+        try:
+            html = message.html_text or ""
+        except Exception:
+            html = ""
+        if not html:
+            return None
+        if client.ws_debug:
+            log(f"html_text: {html[:300]!r}")
+        entries = []  # (letter, state) in document order
+        for m in RICH_BTN.finditer(html):
+            state, letter = m.group(1).lower(), m.group(2).lower()
+            entries.append((letter, state))
+        if not entries:
+            return None
+        return build_feedback(entries)
+
+    # =========================================
+    # PARSER 2: INLINE BUTTONS (wh: data attr)
     # =========================================
     async def collect_buttons(message):
-        """Fetch inline buttons. message.buttons is lazy — must await
-        message.get_buttons() or it can be None."""
         buttons = []
-        # 1) Force-fetch from server/DB (the important one)
         try:
             rows = await message.get_buttons()
             if rows:
@@ -104,43 +128,26 @@ def register(client):
                         buttons.append(row)
         except Exception as e:
             log(f"get_buttons failed: {e}")
-        # 2) Cached attr as backup
-        if not buttons:
-            rows = getattr(message, "buttons", None)
-            if rows:
-                for row in rows:
-                    if isinstance(row, (list, tuple)):
-                        buttons.extend(row)
-                    elif row is not None:
-                        buttons.append(row)
-        # 3) Raw reply_markup walk as last resort
-        if not buttons:
-            markup = getattr(message, "reply_markup", None)
-            if markup is not None:
-                try:
-                    for row in getattr(markup, "rows", []):
-                        for btn in getattr(row, "buttons", []):
-                            buttons.append(btn)
-                except Exception:
-                    pass
         return buttons
 
-    async def parse_button_feedback(message):
-        """Returns (guess, feedback) from the bot's tile-buttons.
-        Each button's callback data is wh:<correct|present|absent>:<LETTER>.
-        Buttons come row-by-row; each row = one guess of ws_mode letters."""
-        entries = []
-        buttons = await collect_buttons(message)
-        log(f"buttons fetched: {len(buttons)}")
-        for btn in buttons:
-            data = getattr(btn, "data", None)
-            if not data:
-                continue
+    def decode_data(data):
+        if data is None:
+            return ""
+        if isinstance(data, bytes):
             try:
-                text = data.decode("utf-8", "ignore")
+                return data.decode("utf-8", "ignore")
             except Exception:
-                continue
-            if client.ws_debug:
+                return ""
+        try:
+            return base64.b64decode(str(data)).decode("utf-8", "ignore")
+        except Exception:
+            return str(data)
+
+    async def parse_button_feedback(message):
+        entries = []
+        for btn in await collect_buttons(message):
+            text = decode_data(getattr(btn, "data", None))
+            if client.ws_debug and text:
                 log(f"button data: {text!r}")
             if not text.startswith("wh:"):
                 continue
@@ -150,10 +157,12 @@ def register(client):
             state, letter = parts[1].lower(), parts[2].lower()
             if state in ("correct", "present", "absent") and letter.isalpha():
                 entries.append((letter, state))
-
         if not entries:
             return None
+        return build_feedback(entries)
 
+    def build_feedback(entries):
+        """Common: entries in order, each full row = one guess."""
         n = client.ws_mode
         if len(entries) < n:
             return None
@@ -161,7 +170,6 @@ def register(client):
         guess = "".join(l for l, s in last_row)
         if len(guess) != n or not guess.isalpha():
             return None
-
         feedback = []
         for _, state in last_row:
             if state == "correct":
@@ -173,7 +181,7 @@ def register(client):
         return guess, feedback
 
     # =========================================
-    # OLD-FORMAT PARSERS (fallbacks)
+    # PARSERS 3/4: OLD-FORMAT FALLBACKS
     # =========================================
     def parse_emoji_feedback(text):
         lines = text.splitlines()
@@ -260,23 +268,35 @@ def register(client):
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.ws (on|off)$"))
     async def toggle_ws(event):
         client.ws_enabled = event.pattern_match.group(1).lower() == "on"
-        await event.edit(f"{'✅' if client.ws_enabled else '❌'} **WordSeek Solver {'Enabled' if client.ws_enabled else 'Disabled'}**")
+        try:
+            await event.edit(f"{'✅' if client.ws_enabled else '❌'} **WordSeek Solver {'Enabled' if client.ws_enabled else 'Disabled'}**")
+        except Exception:
+            await client.send_message("me", f"{'✅' if client.ws_enabled else '❌'} **WordSeek Solver {'Enabled' if client.ws_enabled else 'Disabled'}**")
 
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.ws loop (on|off)$"))
     async def toggle_loop(event):
         client.ws_loop = event.pattern_match.group(1).lower() == "on"
-        await event.edit(f"{'♻️' if client.ws_loop else '❌'} **Auto Loop {'Enabled' if client.ws_loop else 'Disabled'}**")
+        try:
+            await event.edit(f"{'♻️' if client.ws_loop else '❌'} **Auto Loop {'Enabled' if client.ws_loop else 'Disabled'}**")
+        except Exception:
+            await client.send_message("me", f"{'♻️' if client.ws_loop else '❌'} **Auto Loop {'Enabled' if client.ws_loop else 'Disabled'}**")
 
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.ws delay (\d+\.?\d*) (\d+\.?\d*)$"))
     async def set_delay(event):
         client.ws_delay_min = float(event.pattern_match.group(1))
         client.ws_delay_max = float(event.pattern_match.group(2))
-        await event.edit(f"⚡ **WordSeek Delay Set:** {client.ws_delay_min}s - {client.ws_delay_max}s")
+        try:
+            await event.edit(f"⚡ **WordSeek Delay Set:** {client.ws_delay_min}s - {client.ws_delay_max}s")
+        except Exception:
+            await client.send_message("me", f"⚡ **WordSeek Delay Set:** {client.ws_delay_min}s - {client.ws_delay_max}s")
 
     @client.on(events.NewMessage(chats='me', pattern=r"(?i)^\.ws debug (on|off)$"))
     async def toggle_debug(event):
         client.ws_debug = event.pattern_match.group(1).lower() == "on"
-        await event.edit(f"🐞 **WordSeek Debug {'Enabled' if client.ws_debug else 'Disabled'}**")
+        try:
+            await event.edit(f"🐞 **WordSeek Debug {'Enabled' if client.ws_debug else 'Disabled'}**")
+        except Exception:
+            await client.send_message("me", f"🐞 **WordSeek Debug {'Enabled' if client.ws_debug else 'Disabled'}**")
 
     # =========================================
     # MAIN ENGINE
@@ -341,15 +361,16 @@ def register(client):
                 await send_guess(event, guess)
             return
 
-        # --- FEEDBACK PARSING (buttons first, then fallbacks) ---
-        res = await parse_button_feedback(message)
+        # --- FEEDBACK PARSING (rich first, then fallbacks) ---
+        res = parse_rich_feedback(message)
+        if not res:
+            res = await parse_button_feedback(message)
         if not res:
             res = parse_emoji_feedback(text)
         if not res:
             res = parse_bare_word(text)
         if not res:
-            if client.ws_debug:
-                log(f"could not parse feedback. raw={event.raw_text!r} markup={type(getattr(message, 'reply_markup', None)).__name__}")
+            log(f"could not parse feedback. raw={event.raw_text!r}")
             return
 
         guess, feedback = res
