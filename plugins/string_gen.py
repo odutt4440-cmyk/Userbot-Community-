@@ -20,6 +20,41 @@ from database import save_user_session
 # User state tracker
 GEN_DATA = {}
 
+# 🔥 MCUB helper: strict protection mode GetPasswordRequest block karta hai,
+# isliye login client par protection off karna zaroori hai.
+def make_login_client():
+    """Telethon-MCUB compatible client with protection disabled for auth flow."""
+    try:
+        # Naye MCUB versions: constructor kwarg support karte hain
+        return TelegramClient(
+            StringSession(),
+            API_ID,
+            API_HASH,
+            device_model="iPhone 15 Pro Max",
+            system_version="17.5.1",
+            app_version="10.14.2",
+            lang_code="en",
+            system_lang_code="en-US",
+            protection_mode="off"
+        )
+    except TypeError:
+        # Purana signature: client banake baad set karo
+        c = TelegramClient(
+            StringSession(),
+            API_ID,
+            API_HASH,
+            device_model="iPhone 15 Pro Max",
+            system_version="17.5.1",
+            app_version="10.14.2",
+            lang_code="en",
+            system_lang_code="en-US"
+        )
+        try:
+            c.set_protection_mode("off")
+        except Exception:
+            pass  # official Telethon — protection mode exist hi nahi karta
+        return c
+
 # --- 1. START GENERATION ---
 @bot.on_callback_query(filters.regex("^gen_string_internal$"))
 async def start_string_gen(client, query):
@@ -66,17 +101,8 @@ async def handle_gen_input(client, message):
         state["phone"] = clean_phone
         msg = await message.reply("⏳ Connecting to Telegram secure servers...")
         
-        # Telethon client (session generation ke liye)
-        tmp_client = TelegramClient(
-            StringSession(), 
-            API_ID, 
-            API_HASH,
-            device_model="iPhone 15 Pro Max",
-            system_version="17.5.1",
-            app_version="10.14.2",
-            lang_code="en",
-            system_lang_code="en-US"
-        )
+        # 🔥 FIX: protection-mode-safe client factory use karo
+        tmp_client = make_login_client()
         
         await tmp_client.connect()
         
@@ -159,6 +185,7 @@ async def handle_gen_input(client, message):
         msg = await message.reply("⏳ Verifying 2FA Password...")
         
         try:
+            # 🔥 Ab protection off hai, GetPasswordRequest pass hoga
             await tmp_client.sign_in(password=text)
             string = tmp_client.session.save()
             
