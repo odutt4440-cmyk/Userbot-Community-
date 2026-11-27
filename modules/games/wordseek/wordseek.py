@@ -52,6 +52,8 @@ def register(client):
     client.ws_mode = 5
     client.ws_loop = False
     client.ws_loop_cmd = "/new"
+    client.ws_loop_cooldown = 3.0      # gap between /new rounds
+    client.ws_loop_max = 0             # 0 = unlimited (safety cap)
 
     client.ws_words = ALL5.copy()
     client.ws_common = COMMON5.copy()
@@ -242,25 +244,61 @@ def register(client):
                 return False
         return True
 
+    # =========================================
+    # 🔥 SMARTER GUESS LOGIC (positional scoring + caching)
+    # =========================================
+    def build_positional_freq(pool_lower):
+        """Per-position letter frequency across the candidate pool."""
+        pos_freq = [Counter() for _ in range(client.ws_mode)]
+        for w in pool_lower:
+            for i, c in enumerate(w):
+                pos_freq[i][c] += 1
+        return pos_freq
+
+    def score_word(word_lower, pos_freq):
+        """Score = positional strength + unique-letter bonus.
+        High score = maximizes info gained per guess."""
+        s = sum(pos_freq[i][c] for i, c in enumerate(word_lower))
+        s += len(set(word_lower)) * 2
+        return s
+
     def get_next_guess():
+        if not client.ws_used:
+            return STARTERS.get(client.ws_mode, "Slate")
+
         v_common = [w for w in client.ws_common if valid_word(w) and w.lower() not in client.ws_used]
         v_all = [w for w in client.ws_words if valid_word(w) and w.lower() not in client.ws_used]
-        if not client.ws_used: return STARTERS.get(client.ws_mode, "Slate")
         pool = v_common if v_common else v_all
-        if not pool: return None
-        freq = Counter()
-        for w in pool:
-            for char in set(w.lower()): freq[char] += 1
-        pool.sort(key=lambda w: sum(freq[c] for c in set(w.lower())), reverse=True)
-        return pool[0].capitalize()
+        if not pool:
+            return None
+
+        # ENDGAME: 1-2 candidates bache toh seedha answer maar do
+        if len(pool) <= 2:
+            return pool[0].capitalize()
+
+        # Positional frequency compute (fresh each turn — pool chhota hota
+        # jata hai, toh ye fast hai; warm-up pe hi heavy hota hai)
+        pool_lower = [w.lower() for w in pool]
+        pos_freq = build_positional_freq(pool_lower)
+
+        # Scoring source: common pool prefer karo (answers wahan se aate hain),
+        # warna all-pool se elimination word
+        source = v_common if v_common else v_all
+        best, best_score = None, -1
+        for w in source:
+            s = score_word(w.lower(), pos_freq)
+            if s > best_score:
+                best, best_score = w, s
+        return best.capitalize()
 
     async def send_guess(event, guess):
         client.ws_used.add(guess.lower())
         client.ws_last_guess = guess.lower()
         log(f"sending guess: {guess}")
-        async with client.action(event.chat_id, "typing"):
-            await asyncio.sleep(random.uniform(client.ws_delay_min, client.ws_delay_max))
-            await client.send_message(event.chat_id, guess)
+        # 🔥 typing action hata diya — har guess par extra RPC round-trip
+        # lagta tha, wahi "time le raha" feel ka bada reason tha
+        await asyncio.sleep(random.uniform(client.ws_delay_min, client.ws_delay_max))
+        await client.send_message(event.chat_id, guess)
 
     # =========================================
     # COMMANDS (Saved Messages Control)
@@ -331,19 +369,24 @@ def register(client):
 
         message = event.message
         text = clean_text(event.raw_text or "")
+        low = text.lower()
         log(f"bot message received: {text[:80]!r}")
 
-        # --- GAME END DETECTION ---
-        if "You guessed it correctly" in text or "Congrats!" in text or "Game Over!" in text:
+        # --- GAME END DETECTION (broad — loop pakka chalega) ---
+        if any(x in low for x in [
+            "congrats", "guessed it correctly", "game over",
+            "the word was", "better luck", "you lost", "out of guesses"
+        ]):
             log("game ended — resetting")
             reset_state()
             if client.ws_loop and client.ws_loop_cmd:
-                await asyncio.sleep(random.uniform(2.5, 4.5))
+                log(f"loop: restarting with {client.ws_loop_cmd}")
+                await asyncio.sleep(random.uniform(client.ws_loop_cooldown, client.ws_loop_cooldown + 1.5))
                 await client.send_message(client.ws_chat, client.ws_loop_cmd)
             return
 
         # --- GAME START ---
-        if "Game started!" in text or "game started" in text.lower():
+        if "game started" in low:
             guess = get_next_guess()
             log("game start detected")
             if guess:
@@ -351,7 +394,7 @@ def register(client):
             return
 
         # --- INVALID WORD / ALREADY GUESSED ---
-        if "is not a valid" in text.lower() or "already guessed your word" in text.lower():
+        if "is not a valid" in low or "already guessed your word" in low or "not in the word list" in low:
             log("invalid/dupe word — advancing")
             if client.ws_last_guess:
                 client.ws_used.add(client.ws_last_guess)
@@ -370,13 +413,18 @@ def register(client):
         if not res:
             res = parse_bare_word(text)
         if not res:
-            log(f"could not parse feedback. raw={event.raw_text!r}")
+            if client.ws_debug:
+                log(f"could not parse feedback. raw={event.raw_text!r}")
             return
 
         guess, feedback = res
         log(f"feedback parsed: guess={guess} feedback={''.join(feedback)}")
         client.ws_last_guess = guess
 
+        # Agar feedback aisi word ki hai jo humne bheji thi hi nahi
+        # (kisi aur ne guess kiya), toh constraints apply karne mein
+        # koi harm nahi — board sab ki guesses dikhaata hai aur
+        # constraints globally valid hote hain.
         apply_constraints(guess, feedback)
         next_guess = get_next_guess()
         if next_guess:
