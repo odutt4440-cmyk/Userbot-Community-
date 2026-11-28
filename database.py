@@ -211,7 +211,7 @@ async def has_claimed_trial(user_id):
 async def claim_trial(user_id):
     if await has_claimed_trial(user_id):
         return False, "You have already used your free trial."
-    expiry = await add_subscription(user_id, plan_type="Standard", days=1)
+    expiry = await add_subscription(user_id, plan_type="std_15", days=1, plan_name="Standard")
     await trials_db.insert_one({"user_id": user_id, "claimed_at": datetime.datetime.now()})
     return True, expiry
 
