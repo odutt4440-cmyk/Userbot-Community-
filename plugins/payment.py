@@ -223,7 +223,7 @@ async def approve_payment(client, query):
     plan_name = plan_info['name'] 
     plan_days = plan_info['days'] 
 
-    expiry = await add_subscription(target_user_id, plan_type=plan_name, days=plan_days)
+    expiry = await add_subscription(target_user_id, plan_type=plan_key, days=plan_days, plan_name=plan_name)
     
     await query.message.edit_text(
         f"✅ **{plan_name} Activated**\n"
