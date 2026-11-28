@@ -519,7 +519,7 @@ async def do_shift_plan(client, query):
     if not plan: return await query.answer("Invalid plan.")
     
     new_expiry = datetime.datetime.now() + datetime.timedelta(days=plan['days'])
-    await shift_user_plan(target_id, plan['name'], new_expiry)
+    await shift_user_plan(target_id, plan['plan_key'], new_expiry)
     del AWAITING_ADMIN_INPUT[user_id]
     
     await query.message.edit_text(
@@ -549,7 +549,7 @@ async def approve_plan_selected(client, query):
     plan = await get_plan(plan_key)
     if not plan: return await query.answer("Invalid plan.")
     
-    expiry = await add_subscription(target_id, plan_type=plan['name'], days=plan['days'])
+    expiry = await add_subscription(target_id, plan_type=plan['plan_key'], days=plan['days'], plan_name=plan['name'])
     del AWAITING_ADMIN_INPUT[user_id]
     
     await query.message.edit_text(
