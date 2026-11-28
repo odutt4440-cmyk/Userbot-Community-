@@ -227,7 +227,7 @@ async def is_subscribed(user_id):
             del SUBS_CACHE[user_id]
     return False
 
-async def add_subscription(user_id, plan_type="Standard", days=0, hours=0, minutes=0, **kwargs):
+async def add_subscription(user_id, plan_type="Standard", days=0, hours=0, minutes=0, plan_name=None, **kwargs):
     now = datetime.datetime.now()
     if subs_db is None: return now
     res = await subs_db.find_one({"user_id": user_id})
@@ -239,16 +239,16 @@ async def add_subscription(user_id, plan_type="Standard", days=0, hours=0, minut
         
     new_expiry = base_date + datetime.timedelta(days=int(days), hours=int(hours), minutes=int(minutes))
     
-    await subs_db.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "status": "active",
-            "expiry_date": new_expiry,
-            "plan": plan_type,
-            "last_update": now
-        }},
-        upsert=True
-    )
+    update = {
+        "status": "active",
+        "expiry_date": new_expiry,
+        "plan": plan_type,
+        "last_update": now
+    }
+    if plan_name:
+        update["plan_name"] = plan_name
+    
+    await subs_db.update_one({"user_id": user_id}, {"$set": update}, upsert=True)
     SUBS_CACHE[user_id] = new_expiry
     return new_expiry
 
