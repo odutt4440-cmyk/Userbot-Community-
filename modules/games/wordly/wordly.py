@@ -13,7 +13,7 @@ DEBUG = False  # Set True to see logs while debugging
 
 def log(*args):
     if DEBUG:
-        print("[WORDLY]", *args)
+        print("[WORDLY]", *args, flush=True)
 
 def load_words():
     valid = []
@@ -53,29 +53,44 @@ def load_words():
 # Load dictionary on startup (Sorted!)
 WORDS_DB = load_words()
 
+# 🔥 Both bots are the same game — Wordly + Wordgamez dono supported
+GAME_BOTS = ("woordlybot", "wordgamezbot")
+
 def register(client):
     client.w_game_states = {}
     client.w_enabled = True
     client.w_target_chat = None
     client.w_loop = False
-    client.w_delay = 0.5
+    client.w_delay = 0.15          # fast default (timer-friendly)
     client.w_last_cmd = "/new"
+    client.w_active_bot = "woordlybot"   # 🔥 kaunsa bot active hai
+    client.w_letter_cache = {}     # letters -> pre-filtered candidates
 
     def solve(bot_id):
         state = client.w_game_states.get(bot_id)
         if not state or not state.get('letters') or not WORDS_DB: return None
 
-        allowed_set = set(state['letters'].lower())
-        board_counts = Counter(state['letters'].lower())
+        letters_key = state['letters'].lower()
+        allowed_set = set(letters_key)
+        board_counts = Counter(letters_key)
 
-        for word in WORDS_DB:
+        # CACHE: isi letter-set ke liye ek baar filter karo.
+        # 300k+ words ka scan har guess par nahi hoga — 10-50x faster.
+        cands = client.w_letter_cache.get(letters_key)
+        if cands is None:
+            cands = []
+            for w in WORDS_DB:
+                if set(w).issubset(allowed_set):
+                    wc = Counter(w)
+                    if all(wc[c] <= board_counts[c] for c in wc):
+                        cands.append(w)
+            client.w_letter_cache[letters_key] = cands
+            log(f"cached {len(cands)} candidates for {letters_key!r}")
+
+        for word in cands:
             if word in state['used']: continue
-
-            if set(word).issubset(allowed_set):
-                word_counts = Counter(word)
-                if all(word_counts[c] <= board_counts[c] for c in word_counts):
-                    state['used'].add(word)
-                    return word.capitalize()
+            state['used'].add(word)
+            return word.capitalize()
         return None
 
     def extract_letters(text):
@@ -95,6 +110,14 @@ def register(client):
 
         return ""
 
+    async def send_word(event, word):
+        try:
+            await asyncio.sleep(client.w_delay)
+            await client.send_message(event.chat_id, word)
+            log(f"sent: {word}")
+        except Exception as e:
+            log(f"send failed: {e}")
+
     @client.on(events.NewMessage(chats='me'))
     async def control_panel(event):
         text = event.raw_text.lower().strip()
@@ -109,31 +132,39 @@ def register(client):
             client.w_loop = "on" in text
             await event.edit(f"{'🔄' if client.w_loop else '❌'} **Auto-Loop:** {'ON' if client.w_loop else 'OFF'}")
         elif text.startswith(".wdelay"):
+            # robust parsing — ".wdelay" (bina number) current value dikhata hai
+            parts = text.split()
+            if len(parts) == 1:
+                await event.edit(f"⚡ **Current Delay:** {client.w_delay}s\n\nUsage: `.wdelay 0.2`")
+                return
             try:
-                client.w_delay = float(text.split()[1])
-                await event.edit(f"⚡ **Delay:** {client.w_delay}s")
-            except: pass
+                val = float(parts[1])
+                if val < 0: raise ValueError
+                client.w_delay = val
+                await event.edit(f"⚡ **Delay Set:** {val}s")
+            except ValueError:
+                await event.edit("❌ Invalid delay. Example: `.wdelay 0.2`")
 
     @client.on(events.NewMessage(outgoing=True))
     async def detect_new_game(event):
         if not client.w_enabled: return
         text = event.raw_text.lower().strip()
 
-        # 🔥 FIX: Only lock on WoordlyBot commands (/new, /play).
-        # The real username is "woordlybot" (double 'o') — the old check
-        # ("wordly" in text) never matched it, so @Woordlybot commands
-        # were being ignored. Bare /new and /play are allowed because
-        # they are WoordlyBot's default commands.
+        # 🔥 Lock on WoordlyBot / WordgamezBot commands (/new, /play).
+        # Bare /new aur /play allowed, ya in dono bots ka mention.
         m = re.match(r"^/(new|play)(@\S+)?$", text)
         if m:
             mentioned = (m.group(2) or "").lower()
-            if mentioned in ("", "@woordlybot"):
+            if mentioned in ("", "@woordlybot", "@wordgamezbot"):
+                # 🔥 Track kaunsa bot active hai (mention na ho toh default)
+                client.w_active_bot = mentioned.lstrip("@") if mentioned else "woordlybot"
                 client.w_target_chat = event.chat_id
                 client.w_last_cmd = event.raw_text
                 client.w_game_states = {}
+                client.w_letter_cache = {}   # naye board ke liye cache reset
 
                 try:
-                    await client.send_message("me", f"🎯 **Wordly Locked!**\nChat ID: `{event.chat_id}`\nFast Mode: ON 🚀")
+                    await client.send_message("me", f"🎯 **Wordly Locked!**\nChat ID: `{event.chat_id}`\nBot: `@{client.w_active_bot}`\nFast Mode: ON 🚀")
                 except: pass
 
     @client.on(events.NewMessage)
@@ -142,13 +173,20 @@ def register(client):
         if event.chat_id != client.w_target_chat: return
         if event.out: return
 
-        # 🔥 FIX: only react to WoordlyBot's messages, nothing else
+        # 🔥 Sirf ACTIVE bot ke messages process karo (Woordly ya Wordgamez —
+        # jo last command bheja usi pe lock). Baaki bot ignore.
         sender = await event.get_sender()
         sender_name = (getattr(sender, "username", "") or "").lower()
-        if "woordlybot" not in sender_name:
+
+        active = getattr(client, "w_active_bot", "woordlybot")
+        if active and active in sender_name:
+            pass  # active bot — process karo
+        elif not active and any(b in sender_name for b in GAME_BOTS):
+            pass  # fallback — koi bhi game bot chalega
+        else:
             return
 
-        msg = event.raw_text
+        msg = event.raw_text or ""
         msg_up = msg.upper()
         bot_id = event.sender_id
 
@@ -183,17 +221,11 @@ def register(client):
 
             word = solve(bot_id)
             if word:
-                try:
-                    await asyncio.sleep(client.w_delay)
-                    await client.send_message(event.chat_id, word)
-                except: pass
+                await send_word(event, word)
             return
 
         # Instant Recovery
         if "ALREADY FOUND" in msg_up or "NOT A VALID" in msg_up or "NOT VALID" in msg_up:
             word = solve(bot_id)
             if word:
-                try:
-                    await asyncio.sleep(client.w_delay)
-                    await client.send_message(event.chat_id, word)
-                except: pass
+                await send_word(event, word)
